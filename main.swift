@@ -418,9 +418,9 @@ private final class StatusIconProvider {
         case .loading:
             imageName = "ellipsis"
         case .started:
-            imageName = "stop"
+            imageName = "stop.fill"
         case .stopped:
-            imageName = "play"
+            imageName = "play.fill"
         case .error:
             imageName = "exclamationmark.triangle"
         }
