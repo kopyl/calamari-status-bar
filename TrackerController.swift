@@ -204,11 +204,6 @@ final class TrackerController {
         logs
     }
 
-    func clearLogs() {
-        logs.removeAll()
-        notifyLogListeners()
-    }
-
     @discardableResult
     func addStateListener(_ listener: @escaping (TrackerState) -> Void) -> UUID {
         let id = UUID()

@@ -11,8 +11,6 @@ final class MainWindowViewController: NSViewController {
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let saveButton = NSButton(title: "Save Credentials", target: nil, action: nil)
-    private let refreshButton = NSButton(title: "Refresh Now", target: nil, action: nil)
-    private let clearLogsButton = NSButton(title: "Clear Logs", target: nil, action: nil)
     private let logTextView = NSTextView()
     private var stateListenerID: UUID?
     private var logListenerID: UUID?
@@ -89,17 +87,9 @@ final class MainWindowViewController: NSViewController {
         saveButton.target = self
         saveButton.action = #selector(saveCredentials)
         saveButton.keyEquivalent = "\r"
-
-        refreshButton.target = self
-        refreshButton.action = #selector(refreshStatus)
-
-        clearLogsButton.target = self
-        clearLogsButton.action = #selector(clearLogs)
-
-        [saveButton, refreshButton, clearLogsButton].forEach { button in
-            button.bezelStyle = .rounded
-            button.translatesAutoresizingMaskIntoConstraints = false
-        }
+        
+        saveButton.bezelStyle = .rounded
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
 
         let buttonRow = NSStackView()
         buttonRow.orientation = .horizontal
@@ -107,8 +97,6 @@ final class MainWindowViewController: NSViewController {
         buttonRow.spacing = 8
         buttonRow.translatesAutoresizingMaskIntoConstraints = false
         buttonRow.addArrangedSubview(saveButton)
-        buttonRow.addArrangedSubview(refreshButton)
-        buttonRow.addArrangedSubview(clearLogsButton)
         let spacer = NSView()
         spacer.translatesAutoresizingMaskIntoConstraints = false
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -186,14 +174,6 @@ final class MainWindowViewController: NSViewController {
 
     @objc private func saveCredentials() {
         trackerController.updateCredentials(email: emailField.stringValue, password: passwordField.stringValue)
-    }
-
-    @objc private func refreshStatus() {
-        trackerController.refreshStatus(showLoading: true)
-    }
-
-    @objc private func clearLogs() {
-        trackerController.clearLogs()
     }
 }
 
