@@ -46,6 +46,11 @@ final class TrackerController {
         }
     }
 
+    struct Project: Equatable, Hashable {
+        let id: Int
+        let name: String
+    }
+
     enum TrackerState: Equatable {
         case loading
         case started
@@ -122,18 +127,21 @@ final class TrackerController {
     private var stateListeners: [UUID: (TrackerState) -> Void] = [:]
     private var logListeners: [UUID: ([String]) -> Void] = [:]
     private var authListeners: [UUID: (Bool) -> Void] = [:]
+    private var projectListeners: [UUID: ([Project]) -> Void] = [:]
     private var logs: [String] = []
+    private var projects: [Project] = []
     private var state: TrackerState = .loading
     private var lastStableState: TrackerState = .stopped
     private var credentials: Credentials
     private var authTokens: AuthTokens?
+    private var selectedProjectId: Int?
     private var isBusy = false
     private var pendingStatusRefresh = false
     private var authFailureDetected = false
-    private let projectId = 10
 
     init() {
         credentials = tokensStore.load()
+        selectedProjectId = tokensStore.loadProjectId()
     }
 
     deinit {
@@ -143,6 +151,7 @@ final class TrackerController {
     func start() {
         notifyStateListeners(state)
         notifyAuthListeners()
+        notifyProjectListeners()
         startPolling()
         refreshStatus(showLoading: true)
     }
@@ -207,6 +216,14 @@ final class TrackerController {
         logs
     }
 
+    func currentProjects() -> [Project] {
+        projects
+    }
+
+    func currentProjectId() -> Int? {
+        selectedProjectId
+    }
+
     func isAuthenticated() -> Bool {
         authTokens?.isValid == true && authFailureDetected == false
     }
@@ -240,6 +257,20 @@ final class TrackerController {
     }
 
     @discardableResult
+    func addProjectListener(_ listener: @escaping ([Project]) -> Void) -> UUID {
+        let id = UUID()
+        projectListeners[id] = listener
+        DispatchQueue.main.async { [projects] in
+            listener(projects)
+        }
+        return id
+    }
+
+    func removeProjectListener(_ id: UUID) {
+        projectListeners.removeValue(forKey: id)
+    }
+
+    @discardableResult
     func addAuthListener(_ listener: @escaping (Bool) -> Void) -> UUID {
         let id = UUID()
         authListeners[id] = listener
@@ -252,6 +283,20 @@ final class TrackerController {
 
     func removeAuthListener(_ id: UUID) {
         authListeners.removeValue(forKey: id)
+    }
+
+    func updateSelectedProjectId(_ id: Int?) {
+        selectedProjectId = id
+        tokensStore.saveProjectId(id)
+    }
+
+    private func updateSelectedProjectFromStatus(_ id: Int?) {
+        if selectedProjectId == id {
+            return
+        }
+        selectedProjectId = id
+        tokensStore.saveProjectId(id)
+        notifyProjectListeners()
     }
 
     private func performToggleAction() async {
@@ -280,11 +325,17 @@ final class TrackerController {
             let response = try await sendRequest(for: .status)
             responseBody = String(data: response.data, encoding: .utf8) ?? "<non-utf8>"
             let newState = try parseStatus(from: response.data)
+            let fetchedProjects = parseProjects(from: response.data)
+            let trackedProject = parseTrackedProject(from: response.data)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isBusy = false
                 self.pendingStatusRefresh = false
                 self.updateState(newState)
+                self.updateProjects(fetchedProjects)
+                if trackedProject.hasActiveShift {
+                    self.updateSelectedProjectFromStatus(trackedProject.projectId)
+                }
             }
         } catch {
             if let body = responseBody {
@@ -301,8 +352,12 @@ final class TrackerController {
         let startResponse = try await sendRequest(for: .start)
         appendLog("Start tracker succeeded (HTTP \(startResponse.statusCode)).")
 
-        let specifyResponse = try await sendRequest(for: .specifyProject(projectId: projectId))
-        appendLog("Project specified (HTTP \(specifyResponse.statusCode)).")
+        if let projectId = selectedProjectId {
+            let specifyResponse = try await sendRequest(for: .specifyProject(projectId: projectId))
+            appendLog("Project specified (HTTP \(specifyResponse.statusCode)).")
+        } else {
+            appendLog("No project selected; skipping project selection.")
+        }
     }
 
     private func runStop() async throws {
@@ -346,6 +401,46 @@ final class TrackerController {
         }
         let raw = String(data: data, encoding: .utf8) ?? "<non-utf8>"
         throw TrackerError.statusParsingFailed(raw)
+    }
+
+    private func parseProjects(from data: Data) -> [Project] {
+        guard let jsonObject = try? JSONSerialization.jsonObject(with: data),
+              let root = jsonObject as? [String: Any],
+              let projects = root["activeProjects"] as? [[String: Any]] else {
+            return []
+        }
+        var seen = Set<Int>()
+        var results: [Project] = []
+        for item in projects {
+            guard let id = item["id"] as? Int,
+                  let name = item["name"] as? String else { continue }
+            if seen.insert(id).inserted {
+                results.append(Project(id: id, name: name))
+            }
+        }
+        return results
+    }
+
+    private func parseTrackedProject(from data: Data) -> (hasActiveShift: Bool, projectId: Int?) {
+        guard let jsonObject = try? JSONSerialization.jsonObject(with: data),
+              let root = jsonObject as? [String: Any],
+              let dayShifts = root["dayShifts"] as? [[String: Any]] else {
+            return (false, nil)
+        }
+        for shift in dayShifts {
+            let finishedTime = shift["finishedTime"]
+            let isActive = finishedTime == nil || finishedTime is NSNull
+            guard isActive else { continue }
+            guard let projects = shift["projects"] as? [[String: Any]] else {
+                return (true, nil)
+            }
+            if let firstProject = projects.first {
+                let projectId = firstProject["projectId"] as? Int
+                return (true, projectId)
+            }
+            return (true, nil)
+        }
+        return (false, nil)
     }
 
     private func extractStateString(from data: Data) -> String? {
@@ -480,10 +575,31 @@ final class TrackerController {
         }
     }
 
+    private func updateProjects(_ newProjects: [Project]) {
+        if newProjects == projects {
+            return
+        }
+        projects = newProjects
+        if let currentId = selectedProjectId, projects.contains(where: { $0.id == currentId }) == false {
+            selectedProjectId = nil
+            tokensStore.saveProjectId(nil)
+        }
+        notifyProjectListeners()
+    }
+
     private func notifyAuthListeners() {
         let snapshot = isAuthenticated()
         DispatchQueue.main.async {
             for handler in self.authListeners.values {
+                handler(snapshot)
+            }
+        }
+    }
+
+    private func notifyProjectListeners() {
+        let snapshot = projects
+        DispatchQueue.main.async {
+            for handler in self.projectListeners.values {
                 handler(snapshot)
             }
         }
@@ -506,6 +622,7 @@ final class TrackerController {
 private final class TokenStore {
     private let emailKey = "CalamariTrackerEmail"
     private let passwordKey = "CalamariTrackerPassword"
+    private let projectIdKey = "CalamariTrackerProjectId"
 
     func load() -> TrackerController.Credentials {
         let defaults = UserDefaults.standard
@@ -518,6 +635,21 @@ private final class TokenStore {
         let defaults = UserDefaults.standard
         defaults.set(credentials.sanitizedEmail, forKey: emailKey)
         defaults.set(credentials.sanitizedPassword, forKey: passwordKey)
+    }
+
+    func loadProjectId() -> Int? {
+        let defaults = UserDefaults.standard
+        let value = defaults.object(forKey: projectIdKey) as? NSNumber
+        return value?.intValue
+    }
+
+    func saveProjectId(_ projectId: Int?) {
+        let defaults = UserDefaults.standard
+        if let projectId {
+            defaults.set(projectId, forKey: projectIdKey)
+        } else {
+            defaults.removeObject(forKey: projectIdKey)
+        }
     }
 }
 

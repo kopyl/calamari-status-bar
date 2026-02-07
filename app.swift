@@ -3,6 +3,7 @@ import Cocoa
 class Application: NSApplication {
     override init() {
         super.init()
+        UserDefaults.standard.removeObject(forKey: "CalamariTrackerProjectId")
         configureMenus()
     }
 

@@ -12,10 +12,13 @@ final class MainWindowViewController: NSViewController {
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let saveButton = NSButton(title: "Save Credentials", target: nil, action: nil)
+    private let projectPopup = NSPopUpButton()
     private let logTextView = NSTextView()
     private var stateListenerID: UUID?
     private var logListenerID: UUID?
     private var authListenerID: UUID?
+    private var projectListenerID: UUID?
+    private var currentState: TrackerController.TrackerState = .loading
 
     init(trackerController: TrackerController) {
         self.trackerController = trackerController
@@ -35,6 +38,9 @@ final class MainWindowViewController: NSViewController {
         }
         if let authListenerID {
             trackerController.removeAuthListener(authListenerID)
+        }
+        if let projectListenerID {
+            trackerController.removeProjectListener(projectListenerID)
         }
     }
 
@@ -70,6 +76,11 @@ final class MainWindowViewController: NSViewController {
         statusLabel.alignment = .left
         statusLabel.lineBreakMode = .byWordWrapping
         container.addArrangedSubview(statusLabel)
+
+        projectPopup.target = self
+        projectPopup.action = #selector(projectSelectionChanged)
+        projectPopup.translatesAutoresizingMaskIntoConstraints = false
+        container.addArrangedSubview(makePopupRow(label: "Project", popup: projectPopup))
 
         emailField.placeholderString = "email"
         passwordField.placeholderString = "password"
@@ -156,6 +167,7 @@ final class MainWindowViewController: NSViewController {
         passwordField.stringValue = credentials.sanitizedPassword
         updateLogView(with: trackerController.currentLogs())
         updateLoginVisibility(isAuthenticated: trackerController.isAuthenticated())
+        updateProjectOptions(trackerController.currentProjects())
     }
 
     private func subscribeToController() {
@@ -168,16 +180,21 @@ final class MainWindowViewController: NSViewController {
         authListenerID = trackerController.addAuthListener { [weak self] isAuthenticated in
             self?.updateLoginVisibility(isAuthenticated: isAuthenticated)
         }
+        projectListenerID = trackerController.addProjectListener { [weak self] projects in
+            self?.updateProjectOptions(projects)
+        }
     }
 
     private func updateStatusLabel(for state: TrackerController.TrackerState) {
         statusLabel.stringValue = "Status: \(state.displayDescription)"
+        currentState = state
         switch state {
         case .error:
             statusLabel.textColor = NSColor.systemRed
         default:
             statusLabel.textColor = NSColor.labelColor
         }
+        updateProjectEnabledState()
     }
 
     private func updateLogView(with logs: [String]) {
@@ -187,8 +204,81 @@ final class MainWindowViewController: NSViewController {
         }
     }
 
+    private func updateProjectOptions(_ projects: [TrackerController.Project]) {
+        projectPopup.removeAllItems()
+        guard projects.isEmpty == false else {
+            projectPopup.addItem(withTitle: "No projects")
+            projectPopup.isEnabled = false
+            return
+        }
+        projectPopup.isEnabled = true
+        let noneItem = NSMenuItem(title: "No project", action: nil, keyEquivalent: "")
+        noneItem.representedObject = NSNull()
+        projectPopup.menu?.addItem(noneItem)
+        for project in projects {
+            let item = NSMenuItem(title: project.name, action: nil, keyEquivalent: "")
+            item.representedObject = project.id
+            item.toolTip = "Project ID: \(project.id)"
+            projectPopup.menu?.addItem(item)
+        }
+        let selectedId = trackerController.currentProjectId()
+        if let selectedId,
+           let item = projectPopup.itemArray.first(where: { ($0.representedObject as? Int) == selectedId }) {
+            projectPopup.select(item)
+        } else {
+            projectPopup.select(noneItem)
+            trackerController.updateSelectedProjectId(nil)
+        }
+        updateProjectEnabledState()
+    }
+
+    private func makePopupRow(label: String, popup: NSPopUpButton) -> NSStackView {
+        let labelField = NSTextField(labelWithString: label)
+        labelField.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        labelField.alignment = .right
+        labelField.translatesAutoresizingMaskIntoConstraints = false
+        labelField.widthAnchor.constraint(equalToConstant: 170).isActive = true
+
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.addArrangedSubview(labelField)
+        row.addArrangedSubview(popup)
+        popup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return row
+    }
+
     private func updateLoginVisibility(isAuthenticated: Bool) {
         loginContainer.isHidden = isAuthenticated
+    }
+
+    private func updateProjectEnabledState() {
+        if currentState == .started {
+            projectPopup.isEnabled = false
+        } else if projectPopup.itemArray.first?.title == "No projects" {
+            projectPopup.isEnabled = false
+        } else {
+            projectPopup.isEnabled = true
+        }
+    }
+
+    @objc private func projectSelectionChanged() {
+        guard let selectedItem = projectPopup.selectedItem else {
+            trackerController.updateSelectedProjectId(nil)
+            return
+        }
+        if selectedItem.representedObject is NSNull {
+            trackerController.updateSelectedProjectId(nil)
+            return
+        }
+        if let projectId = selectedItem.representedObject as? Int {
+            trackerController.updateSelectedProjectId(projectId)
+        } else {
+            trackerController.updateSelectedProjectId(nil)
+        }
     }
 
     @objc private func saveCredentials() {
