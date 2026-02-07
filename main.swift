@@ -7,16 +7,180 @@ private enum WindowConfig {
 
 final class MainWindowViewController: NSViewController {
     private let trackerController: TrackerController
-    private let statusLabel = NSTextField(labelWithString: "Status: Loading…")
-    private let loginContainer = NSStackView()
+    private var authListenerID: UUID?
+    private var currentChild: NSViewController?
+
+    init(trackerController: TrackerController) {
+        self.trackerController = trackerController
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        if let authListenerID {
+            trackerController.removeAuthListener(authListenerID)
+        }
+    }
+
+    override func loadView() {
+        view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        showContent(isAuthenticated: trackerController.isAuthenticated())
+        authListenerID = trackerController.addAuthListener { [weak self] isAuthenticated in
+            self?.showContent(isAuthenticated: isAuthenticated)
+        }
+    }
+
+    private func showContent(isAuthenticated: Bool) {
+        let nextController: NSViewController
+        if isAuthenticated {
+            nextController = TrackerViewController(trackerController: trackerController)
+        } else {
+            nextController = LoginViewController(trackerController: trackerController)
+        }
+
+        if let currentChild {
+            currentChild.view.removeFromSuperview()
+            currentChild.removeFromParent()
+        }
+        addChild(nextController)
+        nextController.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(nextController.view)
+        NSLayoutConstraint.activate([
+            nextController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            nextController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            nextController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            nextController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        currentChild = nextController
+    }
+}
+
+final class LoginViewController: NSViewController {
+    private let trackerController: TrackerController
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let saveButton = NSButton(title: "Save Credentials", target: nil, action: nil)
+
+    init(trackerController: TrackerController) {
+        self.trackerController = trackerController
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        configureUI()
+        applyInitialData()
+    }
+
+    private func configureUI() {
+        let container = NSStackView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.orientation = .vertical
+        container.spacing = 20
+        container.alignment = .leading
+        view.addSubview(container)
+
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            container.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
+            container.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -20)
+        ])
+
+        emailField.placeholderString = "email"
+        passwordField.placeholderString = "password"
+        [emailField, passwordField].forEach { field in
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.usesSingleLineMode = true
+            field.lineBreakMode = .byTruncatingTail
+            field.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        }
+
+        let tokenStack = NSStackView()
+        tokenStack.orientation = .vertical
+        tokenStack.alignment = .leading
+        tokenStack.spacing = 8
+        tokenStack.translatesAutoresizingMaskIntoConstraints = false
+        tokenStack.addArrangedSubview(makeInputRow(label: "Email", field: emailField))
+        tokenStack.addArrangedSubview(makeInputRow(label: "Password", field: passwordField))
+        container.addArrangedSubview(tokenStack)
+
+        saveButton.target = self
+        saveButton.action = #selector(saveCredentials)
+        saveButton.keyEquivalent = "\r"
+        saveButton.bezelStyle = .rounded
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let buttonRow = NSStackView()
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = 8
+        buttonRow.translatesAutoresizingMaskIntoConstraints = false
+        buttonRow.addArrangedSubview(saveButton)
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        buttonRow.addArrangedSubview(spacer)
+        container.addArrangedSubview(buttonRow)
+    }
+
+    private func makeInputRow(label: String, field: NSTextField) -> NSStackView {
+        let labelField = NSTextField(labelWithString: label)
+        labelField.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        labelField.alignment = .right
+        labelField.translatesAutoresizingMaskIntoConstraints = false
+        labelField.widthAnchor.constraint(equalToConstant: 170).isActive = true
+
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.addArrangedSubview(labelField)
+        row.addArrangedSubview(field)
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return row
+    }
+
+    private func applyInitialData() {
+        let credentials = trackerController.currentCredentials()
+        emailField.stringValue = credentials.sanitizedEmail
+        passwordField.stringValue = credentials.sanitizedPassword
+    }
+
+    @objc private func saveCredentials() {
+        trackerController.updateCredentials(email: emailField.stringValue, password: passwordField.stringValue)
+    }
+}
+
+final class TrackerViewController: NSViewController {
+    private let trackerController: TrackerController
+    private let statusLabel = NSTextField(labelWithString: "Status: Loading…")
     private let projectPopup = NSPopUpButton()
     private let logTextView = NSTextView()
     private var stateListenerID: UUID?
     private var logListenerID: UUID?
-    private var authListenerID: UUID?
     private var projectListenerID: UUID?
     private var currentState: TrackerController.TrackerState = .loading
 
@@ -35,9 +199,6 @@ final class MainWindowViewController: NSViewController {
         }
         if let logListenerID {
             trackerController.removeLogListener(logListenerID)
-        }
-        if let authListenerID {
-            trackerController.removeAuthListener(authListenerID)
         }
         if let projectListenerID {
             trackerController.removeProjectListener(projectListenerID)
@@ -82,53 +243,8 @@ final class MainWindowViewController: NSViewController {
         projectPopup.translatesAutoresizingMaskIntoConstraints = false
         
         view.addSubview(projectPopup)
-        
-        projectPopup.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20).isActive = true
         projectPopup.topAnchor.constraint(equalTo: view.topAnchor, constant: 20).isActive = true
-
-        emailField.placeholderString = "email"
-        passwordField.placeholderString = "password"
-        [emailField, passwordField].forEach { field in
-            field.translatesAutoresizingMaskIntoConstraints = false
-            field.usesSingleLineMode = true
-            field.lineBreakMode = .byTruncatingTail
-            field.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        }
-
-        loginContainer.orientation = .vertical
-        loginContainer.alignment = .leading
-        loginContainer.spacing = 12
-        loginContainer.translatesAutoresizingMaskIntoConstraints = false
-
-        let tokenStack = NSStackView()
-        tokenStack.orientation = .vertical
-        tokenStack.alignment = .leading
-        tokenStack.spacing = 8
-        tokenStack.translatesAutoresizingMaskIntoConstraints = false
-        tokenStack.addArrangedSubview(makeInputRow(label: "Email", field: emailField))
-        tokenStack.addArrangedSubview(makeInputRow(label: "Password", field: passwordField))
-        loginContainer.addArrangedSubview(tokenStack)
-
-        saveButton.target = self
-        saveButton.action = #selector(saveCredentials)
-        saveButton.keyEquivalent = "\r"
-        
-        saveButton.bezelStyle = .rounded
-        saveButton.translatesAutoresizingMaskIntoConstraints = false
-
-        let buttonRow = NSStackView()
-        buttonRow.orientation = .horizontal
-        buttonRow.alignment = .centerY
-        buttonRow.spacing = 8
-        buttonRow.translatesAutoresizingMaskIntoConstraints = false
-        buttonRow.addArrangedSubview(saveButton)
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        buttonRow.addArrangedSubview(spacer)
-        loginContainer.addArrangedSubview(buttonRow)
-        container.addArrangedSubview(loginContainer)
+        projectPopup.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20).isActive = true
 
         logTextView.isEditable = false
         logTextView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
@@ -146,31 +262,8 @@ final class MainWindowViewController: NSViewController {
         container.addArrangedSubview(scrollView)
     }
 
-    private func makeInputRow(label: String, field: NSTextField) -> NSStackView {
-        let labelField = NSTextField(labelWithString: label)
-        labelField.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        labelField.alignment = .right
-        labelField.translatesAutoresizingMaskIntoConstraints = false
-        labelField.widthAnchor.constraint(equalToConstant: 170).isActive = true
-
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 12
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.addArrangedSubview(labelField)
-        row.addArrangedSubview(field)
-        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return row
-    }
-
     private func applyInitialData() {
-        let credentials = trackerController.currentCredentials()
-        emailField.stringValue = credentials.sanitizedEmail
-        passwordField.stringValue = credentials.sanitizedPassword
         updateLogView(with: trackerController.currentLogs())
-        updateLoginVisibility(isAuthenticated: trackerController.isAuthenticated())
         updateProjectOptions(trackerController.currentProjects())
     }
 
@@ -180,9 +273,6 @@ final class MainWindowViewController: NSViewController {
         }
         logListenerID = trackerController.addLogListener { [weak self] logs in
             self?.updateLogView(with: logs)
-        }
-        authListenerID = trackerController.addAuthListener { [weak self] isAuthenticated in
-            self?.updateLoginVisibility(isAuthenticated: isAuthenticated)
         }
         projectListenerID = trackerController.addProjectListener { [weak self] projects in
             self?.updateProjectOptions(projects)
@@ -255,10 +345,6 @@ final class MainWindowViewController: NSViewController {
         return row
     }
 
-    private func updateLoginVisibility(isAuthenticated: Bool) {
-        loginContainer.isHidden = isAuthenticated
-    }
-
     private func updateProjectEnabledState() {
         if currentState == .started {
             projectPopup.isEnabled = false
@@ -283,10 +369,6 @@ final class MainWindowViewController: NSViewController {
         } else {
             trackerController.updateSelectedProjectId(nil)
         }
-    }
-
-    @objc private func saveCredentials() {
-        trackerController.updateCredentials(email: emailField.stringValue, password: passwordField.stringValue)
     }
 }
 
