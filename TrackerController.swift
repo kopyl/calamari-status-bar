@@ -267,7 +267,6 @@ final class TrackerController {
                 guard let self else { return }
                 self.isBusy = false
                 self.pendingStatusRefresh = false
-                self.appendLog("Status fetched (HTTP \(response.statusCode)): \(newState.displayDescription)")
                 self.updateState(newState)
             }
         } catch {
