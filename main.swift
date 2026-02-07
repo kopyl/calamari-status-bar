@@ -424,16 +424,29 @@ private final class StatusIconProvider {
         case .error:
             imageName = "exclamationmark.triangle"
         }
-        let image = makeSymbolImage(named: imageName)
+        let image: NSImage
+        if kind == .started {
+            image = makeSymbolImage(named: imageName, tintColor: .calamariRed)
+        } else {
+            image = makeSymbolImage(named: imageName, tintColor: nil)
+        }
         cache[kind] = image
         return image
     }
 
-    private func makeSymbolImage(named name: String) -> NSImage {
+    private func makeSymbolImage(named name: String, tintColor: NSColor?) -> NSImage {
         if let symbolImage = NSImage(systemSymbolName: name, accessibilityDescription: nil) {
-            symbolImage.isTemplate = true
             let configuration = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
-            return symbolImage.withSymbolConfiguration(configuration) ?? symbolImage
+            var configured = symbolImage.withSymbolConfiguration(configuration) ?? symbolImage
+            if let tintColor {
+                configured = configured.withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(paletteColors: [tintColor])
+                ) ?? configured
+                configured.isTemplate = false
+                return configured
+            }
+            configured.isTemplate = true
+            return configured
         }
         let size = NSSize(width: 14, height: 14)
         let fallback = NSImage(size: size)
