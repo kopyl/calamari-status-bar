@@ -514,9 +514,14 @@ final class TrackerController {
         }
         let nowString = root["now"] as? String
         let nowDate = nowString.flatMap { Self.apiDateFormatter.date(from: $0) } ?? Date()
+        let timezoneId = root["timezone"] as? String
+        let timezone = timezoneId.flatMap(TimeZone.init(identifier:)) ?? TimeZone.current
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timezone
+        let dayStart = calendar.startOfDay(for: nowDate)
         var total = 0
         for shift in dayShifts {
-            if let shiftSeconds = shiftDurationSeconds(shift: shift, now: nowDate) {
+            if let shiftSeconds = shiftDurationSeconds(shift: shift, dayStart: dayStart, now: nowDate) {
                 total += shiftSeconds
                 continue
             }
@@ -532,7 +537,8 @@ final class TrackerController {
                           let startedDate = Self.apiDateFormatter.date(from: startedString) else {
                         continue
                     }
-                    let interval = Int(nowDate.timeIntervalSince(startedDate))
+                    let clampedStart = max(startedDate, dayStart)
+                    let interval = Int(nowDate.timeIntervalSince(clampedStart))
                     if interval > 0 {
                         total += interval
                     }
@@ -542,19 +548,22 @@ final class TrackerController {
         return total
     }
 
-    private func shiftDurationSeconds(shift: [String: Any], now: Date) -> Int? {
+    private func shiftDurationSeconds(shift: [String: Any], dayStart: Date, now: Date) -> Int? {
         guard let startedString = shift["startedTime"] as? String,
               let startedDate = Self.apiDateFormatter.date(from: startedString) else {
             return nil
         }
         if let finishedString = shift["finishedTime"] as? String,
            let finishedDate = Self.apiDateFormatter.date(from: finishedString) {
-            let interval = Int(finishedDate.timeIntervalSince(startedDate))
+            let clampedStart = max(startedDate, dayStart)
+            let clampedEnd = min(finishedDate, now)
+            let interval = Int(clampedEnd.timeIntervalSince(clampedStart))
             return interval > 0 ? interval : 0
         }
         let isActive = (shift["finishedTime"] == nil || shift["finishedTime"] is NSNull)
         if isActive {
-            let interval = Int(now.timeIntervalSince(startedDate))
+            let clampedStart = max(startedDate, dayStart)
+            let interval = Int(now.timeIntervalSince(clampedStart))
             return interval > 0 ? interval : 0
         }
         return nil
