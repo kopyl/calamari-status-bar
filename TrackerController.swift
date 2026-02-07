@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 final class TrackerController {
     struct Credentials: Equatable {
@@ -821,18 +822,17 @@ private final class TokenStore {
     private let loginEnabledKey = "CalamariTrackerLoginEnabled"
     private let csrfTokenKey = "CalamariTrackerCSRFToken"
     private let sessionTokenKey = "CalamariTrackerSessionToken"
+    private let keychainStore = KeychainStore(service: "CalamariStatusBar")
 
     func load() -> TrackerController.Credentials {
-        let defaults = UserDefaults.standard
-        let email = defaults.string(forKey: emailKey) ?? ""
-        let password = defaults.string(forKey: passwordKey) ?? ""
+        let email = keychainStore.loadString(emailKey) ?? ""
+        let password = keychainStore.loadString(passwordKey) ?? ""
         return TrackerController.Credentials(email: email, password: password)
     }
 
     func save(_ credentials: TrackerController.Credentials) {
-        let defaults = UserDefaults.standard
-        defaults.set(credentials.sanitizedEmail, forKey: emailKey)
-        defaults.set(credentials.sanitizedPassword, forKey: passwordKey)
+        keychainStore.saveString(credentials.sanitizedEmail, for: emailKey)
+        keychainStore.saveString(credentials.sanitizedPassword, for: passwordKey)
     }
 
     func loadLoginEnabled() -> Bool {
@@ -861,9 +861,8 @@ private final class TokenStore {
     }
 
     func loadAuthTokens() -> TrackerController.AuthTokens? {
-        let defaults = UserDefaults.standard
-        guard let csrf = defaults.string(forKey: csrfTokenKey),
-              let session = defaults.string(forKey: sessionTokenKey),
+        guard let csrf = keychainStore.loadString(csrfTokenKey),
+              let session = keychainStore.loadString(sessionTokenKey),
               csrf.isEmpty == false,
               session.isEmpty == false else {
             return nil
@@ -872,14 +871,66 @@ private final class TokenStore {
     }
 
     func saveAuthTokens(_ tokens: TrackerController.AuthTokens?) {
-        let defaults = UserDefaults.standard
         if let tokens, tokens.isValid {
-            defaults.set(tokens.sanitizedCSRF, forKey: csrfTokenKey)
-            defaults.set(tokens.sanitizedSession, forKey: sessionTokenKey)
+            keychainStore.saveString(tokens.sanitizedCSRF, for: csrfTokenKey)
+            keychainStore.saveString(tokens.sanitizedSession, for: sessionTokenKey)
         } else {
-            defaults.removeObject(forKey: csrfTokenKey)
-            defaults.removeObject(forKey: sessionTokenKey)
+            keychainStore.delete(csrfTokenKey)
+            keychainStore.delete(sessionTokenKey)
         }
+    }
+}
+
+private final class KeychainStore {
+    private let service: String
+
+    init(service: String) {
+        self.service = service
+    }
+
+    func loadString(_ key: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess, let data = item as? Data else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func saveString(_ value: String, for key: String) {
+        let data = value.data(using: .utf8) ?? Data()
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+        ]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var addQuery = query
+            addQuery[kSecValueData as String] = data
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+            SecItemAdd(addQuery as CFDictionary, nil)
+        }
+    }
+
+    func delete(_ key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 }
 
