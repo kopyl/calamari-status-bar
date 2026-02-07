@@ -121,6 +121,7 @@ final class TrackerController {
     private var pollTimer: Timer?
     private var stateListeners: [UUID: (TrackerState) -> Void] = [:]
     private var logListeners: [UUID: ([String]) -> Void] = [:]
+    private var authListeners: [UUID: (Bool) -> Void] = [:]
     private var logs: [String] = []
     private var state: TrackerState = .loading
     private var lastStableState: TrackerState = .stopped
@@ -141,6 +142,7 @@ final class TrackerController {
 
     func start() {
         notifyStateListeners(state)
+        notifyAuthListeners()
         startPolling()
         refreshStatus(showLoading: true)
     }
@@ -192,6 +194,7 @@ final class TrackerController {
         authFailureDetected = false
         tokensStore.save(credentials)
         appendLog("Credentials updated.")
+        notifyAuthListeners()
         startPolling()
         refreshStatus(showLoading: true)
     }
@@ -202,6 +205,10 @@ final class TrackerController {
 
     func currentLogs() -> [String] {
         logs
+    }
+
+    func isAuthenticated() -> Bool {
+        authTokens?.isValid == true && authFailureDetected == false
     }
 
     @discardableResult
@@ -230,6 +237,21 @@ final class TrackerController {
 
     func removeLogListener(_ id: UUID) {
         logListeners.removeValue(forKey: id)
+    }
+
+    @discardableResult
+    func addAuthListener(_ listener: @escaping (Bool) -> Void) -> UUID {
+        let id = UUID()
+        authListeners[id] = listener
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            listener(self.isAuthenticated())
+        }
+        return id
+    }
+
+    func removeAuthListener(_ id: UUID) {
+        authListeners.removeValue(forKey: id)
     }
 
     private func performToggleAction() async {
@@ -377,6 +399,7 @@ final class TrackerController {
             authFailureDetected = true
             pendingStatusRefresh = false
             pollTimer?.invalidate()
+            notifyAuthListeners()
         case TrackerError.requestFailed(let label, let underlying):
             message = "\(label) request failed: \(underlying.localizedDescription)"
         case TrackerError.unexpectedStatusCode(let label, let code, let body):
@@ -412,6 +435,7 @@ final class TrackerController {
             await MainActor.run { [weak self] in
                 self?.authTokens = newTokens
                 self?.appendLog("Authenticated successfully.")
+                self?.notifyAuthListeners()
             }
             return newTokens
         } catch let error as NetworkClient.Error {
@@ -451,6 +475,15 @@ final class TrackerController {
         let snapshot = logs
         DispatchQueue.main.async {
             for handler in self.logListeners.values {
+                handler(snapshot)
+            }
+        }
+    }
+
+    private func notifyAuthListeners() {
+        let snapshot = isAuthenticated()
+        DispatchQueue.main.async {
+            for handler in self.authListeners.values {
                 handler(snapshot)
             }
         }

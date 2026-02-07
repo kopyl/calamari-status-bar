@@ -8,12 +8,14 @@ private enum WindowConfig {
 final class MainWindowViewController: NSViewController {
     private let trackerController: TrackerController
     private let statusLabel = NSTextField(labelWithString: "Status: Loading…")
+    private let loginContainer = NSStackView()
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let saveButton = NSButton(title: "Save Credentials", target: nil, action: nil)
     private let logTextView = NSTextView()
     private var stateListenerID: UUID?
     private var logListenerID: UUID?
+    private var authListenerID: UUID?
 
     init(trackerController: TrackerController) {
         self.trackerController = trackerController
@@ -30,6 +32,9 @@ final class MainWindowViewController: NSViewController {
         }
         if let logListenerID {
             trackerController.removeLogListener(logListenerID)
+        }
+        if let authListenerID {
+            trackerController.removeAuthListener(authListenerID)
         }
     }
 
@@ -75,6 +80,11 @@ final class MainWindowViewController: NSViewController {
             field.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         }
 
+        loginContainer.orientation = .vertical
+        loginContainer.alignment = .leading
+        loginContainer.spacing = 12
+        loginContainer.translatesAutoresizingMaskIntoConstraints = false
+
         let tokenStack = NSStackView()
         tokenStack.orientation = .vertical
         tokenStack.alignment = .leading
@@ -82,7 +92,7 @@ final class MainWindowViewController: NSViewController {
         tokenStack.translatesAutoresizingMaskIntoConstraints = false
         tokenStack.addArrangedSubview(makeInputRow(label: "Email", field: emailField))
         tokenStack.addArrangedSubview(makeInputRow(label: "Password", field: passwordField))
-        container.addArrangedSubview(tokenStack)
+        loginContainer.addArrangedSubview(tokenStack)
 
         saveButton.target = self
         saveButton.action = #selector(saveCredentials)
@@ -102,7 +112,8 @@ final class MainWindowViewController: NSViewController {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         buttonRow.addArrangedSubview(spacer)
-        container.addArrangedSubview(buttonRow)
+        loginContainer.addArrangedSubview(buttonRow)
+        container.addArrangedSubview(loginContainer)
 
         logTextView.isEditable = false
         logTextView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
@@ -144,6 +155,7 @@ final class MainWindowViewController: NSViewController {
         emailField.stringValue = credentials.sanitizedEmail
         passwordField.stringValue = credentials.sanitizedPassword
         updateLogView(with: trackerController.currentLogs())
+        updateLoginVisibility(isAuthenticated: trackerController.isAuthenticated())
     }
 
     private func subscribeToController() {
@@ -152,6 +164,9 @@ final class MainWindowViewController: NSViewController {
         }
         logListenerID = trackerController.addLogListener { [weak self] logs in
             self?.updateLogView(with: logs)
+        }
+        authListenerID = trackerController.addAuthListener { [weak self] isAuthenticated in
+            self?.updateLoginVisibility(isAuthenticated: isAuthenticated)
         }
     }
 
@@ -170,6 +185,10 @@ final class MainWindowViewController: NSViewController {
         if let textLength = logTextView.textStorage?.length, textLength > 0 {
             logTextView.scrollRangeToVisible(NSRange(location: textLength - 1, length: 1))
         }
+    }
+
+    private func updateLoginVisibility(isAuthenticated: Bool) {
+        loginContainer.isHidden = isAuthenticated
     }
 
     @objc private func saveCredentials() {
