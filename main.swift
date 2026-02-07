@@ -89,6 +89,7 @@ final class LoginViewController: NSViewController {
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let saveButton = NSButton(title: "Sign in", target: nil, action: nil)
+    private var stateListenerID: UUID?
 
     init(trackerController: TrackerController) {
         self.trackerController = trackerController
@@ -97,6 +98,12 @@ final class LoginViewController: NSViewController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        if let stateListenerID {
+            trackerController.removeStateListener(stateListenerID)
+        }
     }
 
     override func loadView() {
@@ -109,6 +116,7 @@ final class LoginViewController: NSViewController {
         super.viewDidLoad()
         configureUI()
         applyInitialData()
+        subscribeToController()
     }
 
     private func configureUI() {
@@ -183,6 +191,16 @@ final class LoginViewController: NSViewController {
         let credentials = trackerController.currentCredentials()
         emailField.stringValue = credentials.sanitizedEmail
         passwordField.stringValue = credentials.sanitizedPassword
+    }
+
+    private func subscribeToController() {
+        stateListenerID = trackerController.addStateListener { [weak self] state in
+            self?.updateButtonEnabled(for: state)
+        }
+    }
+
+    private func updateButtonEnabled(for state: TrackerController.TrackerState) {
+        saveButton.isEnabled = state != .loading
     }
 
     @objc private func saveCredentials() {
