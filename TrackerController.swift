@@ -128,6 +128,7 @@ final class TrackerController {
     private var authTokens: AuthTokens?
     private var isBusy = false
     private var pendingStatusRefresh = false
+    private var authFailureDetected = false
     private let projectId = 10
 
     init() {
@@ -166,6 +167,9 @@ final class TrackerController {
             updateState(.error("Credentials missing"))
             return
         }
+        guard authFailureDetected == false else {
+            return
+        }
         if isBusy {
             if showLoading {
                 pendingStatusRefresh = true
@@ -185,8 +189,10 @@ final class TrackerController {
         let newCredentials = Credentials(email: email, password: password)
         credentials = newCredentials
         authTokens = nil
+        authFailureDetected = false
         tokensStore.save(credentials)
         appendLog("Credentials updated.")
+        startPolling()
         refreshStatus(showLoading: true)
     }
 
@@ -375,6 +381,9 @@ final class TrackerController {
             message = "Credentials missing"
         case TrackerError.authenticationFailed(let reason):
             message = "Auth failed: \(reason)"
+            authFailureDetected = true
+            pendingStatusRefresh = false
+            pollTimer?.invalidate()
         case TrackerError.requestFailed(let label, let underlying):
             message = "\(label) request failed: \(underlying.localizedDescription)"
         case TrackerError.unexpectedStatusCode(let label, let code, let body):
@@ -455,6 +464,9 @@ final class TrackerController {
     }
 
     private func startPolling() {
+        guard authFailureDetected == false else {
+            return
+        }
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refreshStatus()
