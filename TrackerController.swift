@@ -152,24 +152,28 @@ final class TrackerController {
     }
 
     func start() {
+        if isLoginEnabled == false || credentials.isValid == false {
+            updateState(.stopped)
+            notifyAuthListeners()
+            notifyProjectListeners()
+            return
+        }
         notifyStateListeners(state)
         notifyAuthListeners()
         notifyProjectListeners()
-        if isLoginEnabled {
-            startPolling()
-            refreshStatus(showLoading: true)
-        }
+        startPolling()
+        refreshStatus(showLoading: true)
     }
 
     func handleStatusItemTap() {
         guard isLoginEnabled else {
             appendLog("Signed out. Sign in to control tracker.")
-            updateState(.error("Signed out"))
+            updateState(.stopped)
             return
         }
         guard credentials.isValid else {
             appendLog("Credentials missing. Update email/password to control tracker.")
-            updateState(.error("Credentials missing"))
+            updateState(.stopped)
             return
         }
         guard !isBusy else {
@@ -185,11 +189,11 @@ final class TrackerController {
 
     func refreshStatus(showLoading: Bool = false) {
         guard isLoginEnabled else {
-            updateState(.error("Signed out"))
+            updateState(.stopped)
             return
         }
         guard credentials.isValid else {
-            updateState(.error("Credentials missing"))
+            updateState(.stopped)
             return
         }
         guard authFailureDetected == false else {
@@ -312,7 +316,7 @@ final class TrackerController {
         tokensStore.saveAuthTokens(nil)
         authFailureDetected = false
         pollTimer?.invalidate()
-        updateState(.error("Signed out"))
+        updateState(.stopped)
         appendLog("Signed out locally.")
     }
 
@@ -521,9 +525,11 @@ final class TrackerController {
     private func handleError(_ error: Error, context: String) {
         isBusy = false
         let message: String
+        let nextState: TrackerState
         switch error {
         case TrackerError.credentialsMissing:
             message = "Credentials missing"
+            nextState = .stopped
         case TrackerError.authenticationFailed(let reason):
             message = "Auth failed: \(reason)"
             authFailureDetected = true
@@ -532,19 +538,24 @@ final class TrackerController {
             pendingStatusRefresh = false
             pollTimer?.invalidate()
             notifyAuthListeners()
+            nextState = .error(message)
         case TrackerError.requestFailed(let label, let underlying):
             message = "\(label) request failed: \(underlying.localizedDescription)"
+            nextState = .error(message)
         case TrackerError.unexpectedStatusCode(let label, let code, let body):
             message = "\(label) HTTP \(code)"
             appendLog("\(label) response body: \(body)")
+            nextState = .error(message)
         case TrackerError.statusParsingFailed(let raw):
             message = "Unable to parse status"
             appendLog("Status response: \(raw)")
+            nextState = .error(message)
         default:
             message = error.localizedDescription
+            nextState = .error(message)
         }
         appendLog("\(context): \(message)")
-        updateState(.error(message))
+        updateState(nextState)
         if pendingStatusRefresh {
             pendingStatusRefresh = false
             refreshStatus(showLoading: false)
