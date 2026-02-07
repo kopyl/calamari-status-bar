@@ -549,9 +549,17 @@ private final class NetworkClient {
     private let authBaseURL = URL(string: "https://core.calamari.io")!
     private let originURL = URL(string: "https://auth.calamari.io")!
     private let session: URLSession
+    private let authSession: URLSession
 
     init(session: URLSession = .shared) {
         self.session = session
+        let config = URLSessionConfiguration.ephemeral
+        config.httpCookieStorage = nil
+        config.httpShouldSetCookies = false
+        config.httpCookieAcceptPolicy = .never
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
+        self.authSession = URLSession(configuration: config)
     }
 
     func send(_ descriptor: RequestDescriptor, tokens: TrackerController.AuthTokens) async throws -> Response {
@@ -600,7 +608,7 @@ private final class NetworkClient {
         request.timeoutInterval = 15
 
         do {
-            let (_, response) = try await session.data(for: request)
+            let (_, response) = try await authSession.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw Error.transport(label: "current-tenant-info", underlying: URLError(.badServerResponse))
             }
@@ -635,7 +643,7 @@ private final class NetworkClient {
         request.timeoutInterval = 15
 
         do {
-            let (_, response) = try await session.data(for: request)
+            let (_, response) = try await authSession.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw Error.transport(label: "sign-in", underlying: URLError(.badServerResponse))
             }
@@ -657,9 +665,13 @@ private final class NetworkClient {
 
     private func cookie(named name: String, response: HTTPURLResponse, url: URL) -> HTTPCookie? {
         let headers = response.allHeaderFields
-        let headerFields = headers.reduce(into: [String: String]()) { result, entry in
-            if let key = entry.key as? String, let value = entry.value as? String {
-                result[key] = value
+        var headerFields: [String: String] = [:]
+        for (rawKey, rawValue) in headers {
+            guard let key = rawKey as? String else { continue }
+            if let value = rawValue as? String {
+                headerFields[key] = value
+            } else if let values = rawValue as? [String] {
+                headerFields[key] = values.joined(separator: ",")
             }
         }
         let cookies = HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: url)
