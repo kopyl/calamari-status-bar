@@ -61,7 +61,7 @@ final class MainWindowViewController: NSViewController {
         let container = NSStackView()
         container.translatesAutoresizingMaskIntoConstraints = false
         container.orientation = .vertical
-        container.spacing = 12
+        container.spacing = 20
         container.alignment = .leading
         view.addSubview(container)
 
