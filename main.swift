@@ -3,6 +3,8 @@ import Cocoa
 private enum WindowConfig {
     static let defaultSize = NSSize(width: 540, height: 420)
     static let minimumSize = NSSize(width: 480, height: 320)
+    static let loginSize = NSSize(width: 200, height: 260)
+    static let loginMinimumSize = NSSize(width: 200, height: 260)
 }
 
 final class MainWindowViewController: NSViewController {
@@ -61,6 +63,24 @@ final class MainWindowViewController: NSViewController {
             nextController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         currentChild = nextController
+        updateWindowSize(isAuthenticated: isAuthenticated)
+    }
+
+    private func updateWindowSize(isAuthenticated: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.view.window else { return }
+            let targetSize = isAuthenticated ? WindowConfig.defaultSize : WindowConfig.loginSize
+            let targetMinSize = isAuthenticated ? WindowConfig.minimumSize : WindowConfig.loginMinimumSize
+            window.minSize = targetMinSize
+
+            let targetContentRect = NSRect(origin: .zero, size: targetSize)
+            let targetWindowFrame = window.frameRect(forContentRect: targetContentRect)
+            var newFrame = window.frame
+            let deltaHeight = newFrame.size.height - targetWindowFrame.size.height
+            newFrame.size = targetWindowFrame.size
+            newFrame.origin.y += deltaHeight
+            window.setFrame(newFrame, display: true, animate: true)
+        }
     }
 }
 
@@ -120,47 +140,43 @@ final class LoginViewController: NSViewController {
         tokenStack.alignment = .leading
         tokenStack.spacing = 8
         tokenStack.translatesAutoresizingMaskIntoConstraints = false
-        tokenStack.addArrangedSubview(makeInputRow(label: "Email", field: emailField))
-        tokenStack.addArrangedSubview(makeInputRow(label: "Password", field: passwordField))
+        let emailColumn = makeInputColumn(label: "Email", field: emailField)
+        let passwordColumn = makeInputColumn(label: "Password", field: passwordField)
+        tokenStack.addArrangedSubview(emailColumn)
+        tokenStack.addArrangedSubview(passwordColumn)
         container.addArrangedSubview(tokenStack)
+        tokenStack.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        emailColumn.widthAnchor.constraint(equalTo: tokenStack.widthAnchor).isActive = true
+        passwordColumn.widthAnchor.constraint(equalTo: tokenStack.widthAnchor).isActive = true
 
+        view.addSubview(saveButton)
         saveButton.target = self
         saveButton.action = #selector(saveCredentials)
         saveButton.keyEquivalent = "\r"
         saveButton.bezelStyle = .rounded
         saveButton.translatesAutoresizingMaskIntoConstraints = false
-
-        let buttonRow = NSStackView()
-        buttonRow.orientation = .horizontal
-        buttonRow.alignment = .centerY
-        buttonRow.spacing = 8
-        buttonRow.translatesAutoresizingMaskIntoConstraints = false
-        buttonRow.addArrangedSubview(saveButton)
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        buttonRow.addArrangedSubview(spacer)
-        container.addArrangedSubview(buttonRow)
+        saveButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20).isActive = true
+        saveButton.leadingAnchor.constraint(equalTo: tokenStack.leadingAnchor).isActive = true
+        saveButton.trailingAnchor.constraint(equalTo: tokenStack.trailingAnchor).isActive = true
     }
 
-    private func makeInputRow(label: String, field: NSTextField) -> NSStackView {
+    private func makeInputColumn(label: String, field: NSTextField) -> NSStackView {
         let labelField = NSTextField(labelWithString: label)
         labelField.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        labelField.alignment = .right
+        labelField.alignment = .left
         labelField.translatesAutoresizingMaskIntoConstraints = false
-        labelField.widthAnchor.constraint(equalToConstant: 170).isActive = true
 
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 12
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.addArrangedSubview(labelField)
-        row.addArrangedSubview(field)
+        let column = NSStackView()
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 6
+        column.translatesAutoresizingMaskIntoConstraints = false
+        column.addArrangedSubview(labelField)
+        column.addArrangedSubview(field)
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return row
+        field.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        return column
     }
 
     private func applyInitialData() {
