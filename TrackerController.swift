@@ -147,6 +147,8 @@ final class TrackerController {
     private var isBusy = false
     private var pendingStatusRefresh = false
     private var authFailureDetected = false
+    private var isTapInFlight = false
+    private var pendingTap = false
 
     init() {
         credentials = tokensStore.load()
@@ -185,10 +187,12 @@ final class TrackerController {
             return
         }
         guard !isBusy else {
-            appendLog("Ignoring tap while another request is running.")
+            pendingTap = true
+            appendLog("Tap queued while another request is running.")
             return
         }
         isBusy = true
+        isTapInFlight = true
         updateState(.loading)
         Task.detached { [weak self] in
             await self?.performToggleAction()
@@ -208,6 +212,9 @@ final class TrackerController {
             return
         }
         if isBusy {
+            if isTapInFlight {
+                return
+            }
             if showLoading {
                 pendingStatusRefresh = true
             }
@@ -370,11 +377,13 @@ final class TrackerController {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                self.isTapInFlight = false
                 self.isBusy = false
-                self.refreshStatus(showLoading: true)
+                self.handlePendingActions()
             }
         } catch {
             await MainActor.run { [weak self] in
+                self?.isTapInFlight = false
                 self?.handleError(error, context: "Toggle action failed")
             }
         }
@@ -399,6 +408,7 @@ final class TrackerController {
                 if trackedProject.hasActiveShift {
                     self.updateSelectedProjectFromStatus(trackedProject.projectId)
                 }
+                self.handlePendingActions()
             }
         } catch {
             if let body = responseBody {
@@ -662,6 +672,7 @@ final class TrackerController {
             pendingStatusRefresh = false
             refreshStatus(showLoading: false)
         }
+        handlePendingActions()
     }
 
     private func ensureAuthenticated() async throws -> AuthTokens {
@@ -783,6 +794,18 @@ final class TrackerController {
         }
         if let timer = pollTimer {
             RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+
+    private func handlePendingActions() {
+        if pendingTap {
+            pendingTap = false
+            handleStatusItemTap()
+            return
+        }
+        if pendingStatusRefresh {
+            pendingStatusRefresh = false
+            refreshStatus(showLoading: false)
         }
     }
 }
