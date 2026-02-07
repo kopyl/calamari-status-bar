@@ -149,6 +149,7 @@ final class TrackerController {
     private var authFailureDetected = false
     private var isTapInFlight = false
     private var pendingTap = false
+    private var statusRequestGeneration = 0
 
     init() {
         credentials = tokensStore.load()
@@ -340,6 +341,11 @@ final class TrackerController {
     }
 
     func signOut() {
+        statusRequestGeneration += 1
+        isBusy = false
+        isTapInFlight = false
+        pendingTap = false
+        pendingStatusRefresh = false
         updateLoginEnabled(false)
         authTokens = nil
         tokensStore.saveAuthTokens(nil)
@@ -390,10 +396,9 @@ final class TrackerController {
     }
 
     private func performStatusFetch() async {
-        var responseBody: String?
+        let generation = statusRequestGeneration
         do {
             let response = try await sendRequest(for: .status)
-            responseBody = String(data: response.data, encoding: .utf8) ?? "<non-utf8>"
             let newState = try parseStatus(from: response.data)
             let fetchedProjects = parseProjects(from: response.data)
             let trackedProject = parseTrackedProject(from: response.data)
@@ -402,6 +407,8 @@ final class TrackerController {
                 guard let self else { return }
                 self.isBusy = false
                 self.pendingStatusRefresh = false
+                guard self.statusRequestGeneration == generation else { return }
+                guard self.isLoginEnabled else { return }
                 self.updateState(newState)
                 self.updateTotalSeconds(totalSeconds)
                 self.updateProjects(fetchedProjects)
@@ -411,9 +418,6 @@ final class TrackerController {
                 self.handlePendingActions()
             }
         } catch {
-            if let body = responseBody {
-                print("[CalamariStatus] Response body before error: \(body)")
-            }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.handleError(error, context: "Failed to fetch status")
