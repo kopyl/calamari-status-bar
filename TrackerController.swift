@@ -238,9 +238,6 @@ final class TrackerController {
                 guard let self else { return }
                 self.isBusy = false
                 self.pendingStatusRefresh = false
-                if let bodyString = bodyForLog {
-                    print("[CalamariStatus] Response body: \(bodyString)")
-                }
                 self.appendLog("Status fetched (HTTP \(response.statusCode)): \(newState.displayDescription)")
                 self.updateState(newState)
             }
@@ -289,7 +286,6 @@ final class TrackerController {
 
     private func parseStatus(from data: Data) throws -> TrackerState {
         if let stringState = extractStateString(from: data) ?? extractStateFromStringHeuristics(data) {
-            print("[CalamariStatus] Parsed status: \(stringState)")
             switch stringState.uppercased() {
             case "STARTED":
                 return .started
