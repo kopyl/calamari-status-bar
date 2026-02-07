@@ -68,7 +68,7 @@ final class LoginViewController: NSViewController {
     private let trackerController: TrackerController
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
-    private let saveButton = NSButton(title: "Save Credentials", target: nil, action: nil)
+    private let saveButton = NSButton(title: "Sign in", target: nil, action: nil)
 
     init(trackerController: TrackerController) {
         self.trackerController = trackerController
@@ -176,7 +176,7 @@ final class LoginViewController: NSViewController {
 
 final class TrackerViewController: NSViewController {
     private let trackerController: TrackerController
-    private let statusLabel = NSTextField(labelWithString: "Status: Loading…")
+    private let statusLabel = NSTextField(labelWithString: "Loading…")
     private let projectPopup = NSPopUpButton()
     private let logTextView = NSTextView()
     private var stateListenerID: UUID?
@@ -280,7 +280,7 @@ final class TrackerViewController: NSViewController {
     }
 
     private func updateStatusLabel(for state: TrackerController.TrackerState) {
-        statusLabel.stringValue = "Status: \(state.displayDescription)"
+        statusLabel.stringValue = state.displayDescription
         currentState = state
         switch state {
         case .error:
