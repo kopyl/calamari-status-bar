@@ -529,8 +529,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func updateStatusItem(for state: TrackerController.TrackerState) {
         guard let button = statusItem?.button else { return }
         button.image = iconProvider.icon(for: state)
+        let isAuthenticated = trackerController.isAuthenticated()
         switch state {
-        case .started, .stopped:
+        case .started, .stopped where isAuthenticated:
             button.title = totalTimeText
         default:
             button.title = ""
