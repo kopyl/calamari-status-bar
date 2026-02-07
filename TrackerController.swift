@@ -1,7 +1,28 @@
 import Foundation
 
 final class TrackerController {
-    struct Tokens: Equatable {
+    struct Credentials: Equatable {
+        var email: String
+        var password: String
+
+        var sanitizedEmail: String { Self.normalize(email) }
+        var sanitizedPassword: String { Self.normalize(password) }
+        var isValid: Bool { !sanitizedEmail.isEmpty && !sanitizedPassword.isEmpty }
+
+        private static func normalize(_ value: String) -> String {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return "" }
+            guard trimmed.contains("\\") else { return trimmed }
+            let mutable = NSMutableString(string: trimmed)
+            let transform = "Any-Hex/Java" as NSString
+            if CFStringTransform(mutable, nil, transform, true) {
+                return String(mutable)
+            }
+            return trimmed
+        }
+    }
+
+    struct AuthTokens: Equatable {
         var csrfToken: String
         var session: String
 
@@ -42,7 +63,8 @@ final class TrackerController {
     }
 
     enum TrackerError: Error {
-        case tokensMissing
+        case credentialsMissing
+        case authenticationFailed(String)
         case requestFailed(label: String, error: Error)
         case unexpectedStatusCode(label: String, code: Int, body: String)
         case statusParsingFailed(String)
@@ -102,13 +124,14 @@ final class TrackerController {
     private var logs: [String] = []
     private var state: TrackerState = .loading
     private var lastStableState: TrackerState = .stopped
-    private var tokens: Tokens
+    private var credentials: Credentials
+    private var authTokens: AuthTokens?
     private var isBusy = false
     private var pendingStatusRefresh = false
     private let projectId = 10
 
     init() {
-        tokens = tokensStore.load()
+        credentials = tokensStore.load()
     }
 
     deinit {
@@ -122,9 +145,9 @@ final class TrackerController {
     }
 
     func handleStatusItemTap() {
-        guard tokens.isValid else {
-            appendLog("Tokens missing. Update tokens to control tracker.")
-            updateState(.error("Tokens missing"))
+        guard credentials.isValid else {
+            appendLog("Credentials missing. Update email/password to control tracker.")
+            updateState(.error("Credentials missing"))
             return
         }
         guard !isBusy else {
@@ -139,8 +162,8 @@ final class TrackerController {
     }
 
     func refreshStatus(showLoading: Bool = false) {
-        guard tokens.isValid else {
-            updateState(.error("Tokens missing"))
+        guard credentials.isValid else {
+            updateState(.error("Credentials missing"))
             return
         }
         if isBusy {
@@ -158,16 +181,17 @@ final class TrackerController {
         }
     }
 
-    func updateTokens(csrfToken: String, session: String) {
-        let newTokens = Tokens(csrfToken: csrfToken, session: session)
-        tokens = newTokens
-        tokensStore.save(tokens)
-        appendLog("Tokens updated.")
+    func updateCredentials(email: String, password: String) {
+        let newCredentials = Credentials(email: email, password: password)
+        credentials = newCredentials
+        authTokens = nil
+        tokensStore.save(credentials)
+        appendLog("Credentials updated.")
         refreshStatus(showLoading: true)
     }
 
-    func currentTokens() -> Tokens {
-        tokens
+    func currentCredentials() -> Credentials {
+        credentials
     }
 
     func currentLogs() -> [String] {
@@ -266,18 +290,22 @@ final class TrackerController {
     }
 
     private func sendRequest(for route: Route) async throws -> NetworkClient.Response {
-        let currentTokens = tokens
-        guard currentTokens.isValid else {
-            throw TrackerError.tokensMissing
-        }
+        let sessionTokens = try await ensureAuthenticated()
         do {
-            return try await networkClient.send(route.descriptor, tokens: currentTokens)
+            return try await networkClient.send(route.descriptor, tokens: sessionTokens)
         } catch let error as NetworkClient.Error {
             switch error {
             case .transport(let label, let underlying):
                 throw TrackerError.requestFailed(label: label, error: underlying)
             case .unexpectedStatusCode(let label, let code, let body):
                 throw TrackerError.unexpectedStatusCode(label: label, code: code, body: body)
+            case .missingCookie(let label, let name):
+                throw TrackerError.requestFailed(
+                    label: label,
+                    error: NSError(domain: "CalamariStatus", code: 0, userInfo: [
+                        NSLocalizedDescriptionKey: "Missing cookie: \(name)"
+                    ])
+                )
             }
         } catch {
             throw TrackerError.requestFailed(label: route.descriptor.label, error: error)
@@ -343,8 +371,10 @@ final class TrackerController {
         isBusy = false
         let message: String
         switch error {
-        case TrackerError.tokensMissing:
-            message = "Tokens missing"
+        case TrackerError.credentialsMissing:
+            message = "Credentials missing"
+        case TrackerError.authenticationFailed(let reason):
+            message = "Auth failed: \(reason)"
         case TrackerError.requestFailed(let label, let underlying):
             message = "\(label) request failed: \(underlying.localizedDescription)"
         case TrackerError.unexpectedStatusCode(let label, let code, let body):
@@ -361,6 +391,31 @@ final class TrackerController {
         if pendingStatusRefresh {
             pendingStatusRefresh = false
             refreshStatus(showLoading: false)
+        }
+    }
+
+    private func ensureAuthenticated() async throws -> AuthTokens {
+        if let authTokens, authTokens.isValid {
+            return authTokens
+        }
+        let currentCredentials = credentials
+        guard currentCredentials.isValid else {
+            throw TrackerError.credentialsMissing
+        }
+        do {
+            let newTokens = try await networkClient.authenticate(
+                email: currentCredentials.sanitizedEmail,
+                password: currentCredentials.sanitizedPassword
+            )
+            await MainActor.run { [weak self] in
+                self?.authTokens = newTokens
+                self?.appendLog("Authenticated successfully.")
+            }
+            return newTokens
+        } catch let error as NetworkClient.Error {
+            throw TrackerError.authenticationFailed(error.localizedDescription)
+        } catch {
+            throw TrackerError.authenticationFailed(error.localizedDescription)
         }
     }
 
@@ -411,20 +466,20 @@ final class TrackerController {
 }
 
 private final class TokenStore {
-    private let csrfKey = "CalamariTrackerCSRFToken"
-    private let sessionKey = "CalamariTrackerSessionToken"
+    private let emailKey = "CalamariTrackerEmail"
+    private let passwordKey = "CalamariTrackerPassword"
 
-    func load() -> TrackerController.Tokens {
+    func load() -> TrackerController.Credentials {
         let defaults = UserDefaults.standard
-        let csrf = defaults.string(forKey: csrfKey) ?? ""
-        let session = defaults.string(forKey: sessionKey) ?? ""
-        return TrackerController.Tokens(csrfToken: csrf, session: session)
+        let email = defaults.string(forKey: emailKey) ?? ""
+        let password = defaults.string(forKey: passwordKey) ?? ""
+        return TrackerController.Credentials(email: email, password: password)
     }
 
-    func save(_ tokens: TrackerController.Tokens) {
+    func save(_ credentials: TrackerController.Credentials) {
         let defaults = UserDefaults.standard
-        defaults.set(tokens.sanitizedCSRF, forKey: csrfKey)
-        defaults.set(tokens.sanitizedSession, forKey: sessionKey)
+        defaults.set(credentials.sanitizedEmail, forKey: emailKey)
+        defaults.set(credentials.sanitizedPassword, forKey: passwordKey)
     }
 }
 
@@ -461,19 +516,33 @@ private final class NetworkClient {
         let urlResponse: HTTPURLResponse
     }
 
-    enum Error: Swift.Error {
+    enum Error: Swift.Error, LocalizedError {
         case transport(label: String, underlying: Swift.Error)
         case unexpectedStatusCode(label: String, code: Int, body: String)
+        case missingCookie(label: String, name: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .transport(let label, let underlying):
+                return "\(label) request failed: \(underlying.localizedDescription)"
+            case .unexpectedStatusCode(let label, let code, _):
+                return "\(label) HTTP \(code)"
+            case .missingCookie(let label, let name):
+                return "\(label) missing cookie: \(name)"
+            }
+        }
     }
 
     private let baseURL = URL(string: "https://xxx.calamari.io")!
+    private let authBaseURL = URL(string: "https://core.calamari.io")!
+    private let originURL = URL(string: "https://auth.calamari.io")!
     private let session: URLSession
 
     init(session: URLSession = .shared) {
         self.session = session
     }
 
-    func send(_ descriptor: RequestDescriptor, tokens: TrackerController.Tokens) async throws -> Response {
+    func send(_ descriptor: RequestDescriptor, tokens: TrackerController.AuthTokens) async throws -> Response {
         let url = baseURL.appendingPathComponent(descriptor.path)
         var request = URLRequest(url: url)
         request.httpMethod = descriptor.method.rawValue
@@ -500,5 +569,88 @@ private final class NetworkClient {
         } catch {
             throw Error.transport(label: descriptor.label, underlying: error)
         }
+    }
+
+    func authenticate(email: String, password: String) async throws -> TrackerController.AuthTokens {
+        let csrfToken = try await fetchCSRFToken()
+        let sessionToken = try await signIn(email: email, password: password, csrfToken: csrfToken)
+        return TrackerController.AuthTokens(csrfToken: csrfToken, session: sessionToken)
+    }
+
+    private func fetchCSRFToken() async throws -> String {
+        let url = authBaseURL.appendingPathComponent("/webapi/tenant/current-tenant-info")
+        var request = URLRequest(url: url)
+        request.httpMethod = Method.get.rawValue
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
+        request.setValue(originURL.absoluteString, forHTTPHeaderField: "Origin")
+        request.setValue(originURL.absoluteString + "/", forHTTPHeaderField: "Referer")
+        request.timeoutInterval = 15
+
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw Error.transport(label: "current-tenant-info", underlying: URLError(.badServerResponse))
+            }
+            guard let csrfCookie = cookie(named: "_csrf_token", response: httpResponse, url: url) else {
+                throw Error.missingCookie(label: "current-tenant-info", name: "_csrf_token")
+            }
+            return csrfCookie.value
+        } catch let error as Error {
+            throw error
+        } catch {
+            throw Error.transport(label: "current-tenant-info", underlying: error)
+        }
+    }
+
+    private func signIn(email: String, password: String, csrfToken: String) async throws -> String {
+        let url = baseURL.appendingPathComponent("/sign-in.do")
+        var request = URLRequest(url: url)
+        request.httpMethod = Method.post.rawValue
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(originURL.absoluteString, forHTTPHeaderField: "Origin")
+        request.setValue(originURL.absoluteString + "/", forHTTPHeaderField: "Referer")
+        request.setValue(csrfToken, forHTTPHeaderField: "x-csrf-token")
+        request.setValue("_csrf_token=\(csrfToken)", forHTTPHeaderField: "Cookie")
+        let body: [String: Any] = [
+            "domain": domain,
+            "login": email,
+            "password": password
+        ]
+        request.httpBody = try Body.json(body).data()
+        request.timeoutInterval = 15
+
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw Error.transport(label: "sign-in", underlying: URLError(.badServerResponse))
+            }
+            guard let sessionCookie = cookie(named: "calamari.cloud.session", response: httpResponse, url: url) else {
+                throw Error.missingCookie(label: "sign-in", name: "calamari.cloud.session")
+            }
+            return sessionCookie.value
+        } catch let error as Error {
+            throw error
+        } catch {
+            throw Error.transport(label: "sign-in", underlying: error)
+        }
+    }
+
+    private var domain: String {
+        let host = baseURL.host ?? ""
+        return host.components(separatedBy: ".").first ?? ""
+    }
+
+    private func cookie(named name: String, response: HTTPURLResponse, url: URL) -> HTTPCookie? {
+        let headers = response.allHeaderFields
+        let headerFields = headers.reduce(into: [String: String]()) { result, entry in
+            if let key = entry.key as? String, let value = entry.value as? String {
+                result[key] = value
+            }
+        }
+        let cookies = HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: url)
+        return cookies.first { $0.name == name }
     }
 }

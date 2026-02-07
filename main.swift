@@ -8,9 +8,9 @@ private enum WindowConfig {
 final class MainWindowViewController: NSViewController {
     private let trackerController: TrackerController
     private let statusLabel = NSTextField(labelWithString: "Status: Loading…")
-    private let csrfField = NSTextField()
-    private let sessionField = NSTextField()
-    private let saveButton = NSButton(title: "Save Tokens", target: nil, action: nil)
+    private let emailField = NSTextField()
+    private let passwordField = NSSecureTextField()
+    private let saveButton = NSButton(title: "Save Credentials", target: nil, action: nil)
     private let refreshButton = NSButton(title: "Refresh Now", target: nil, action: nil)
     private let clearLogsButton = NSButton(title: "Clear Logs", target: nil, action: nil)
     private let logTextView = NSTextView()
@@ -68,12 +68,12 @@ final class MainWindowViewController: NSViewController {
         statusLabel.lineBreakMode = .byWordWrapping
         container.addArrangedSubview(statusLabel)
 
-        csrfField.placeholderString = "x-csrf-token"
-        sessionField.placeholderString = "calamari.cloud.session"
-        [csrfField, sessionField].forEach { field in
+        emailField.placeholderString = "email"
+        passwordField.placeholderString = "password"
+        [emailField, passwordField].forEach { field in
             field.translatesAutoresizingMaskIntoConstraints = false
-            field.usesSingleLineMode = false
-            field.lineBreakMode = .byCharWrapping
+            field.usesSingleLineMode = true
+            field.lineBreakMode = .byTruncatingTail
             field.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         }
 
@@ -82,12 +82,12 @@ final class MainWindowViewController: NSViewController {
         tokenStack.alignment = .leading
         tokenStack.spacing = 8
         tokenStack.translatesAutoresizingMaskIntoConstraints = false
-        tokenStack.addArrangedSubview(makeInputRow(label: "x-csrf-token", field: csrfField))
-        tokenStack.addArrangedSubview(makeInputRow(label: "calamari.cloud.session", field: sessionField))
+        tokenStack.addArrangedSubview(makeInputRow(label: "Email", field: emailField))
+        tokenStack.addArrangedSubview(makeInputRow(label: "Password", field: passwordField))
         container.addArrangedSubview(tokenStack)
 
         saveButton.target = self
-        saveButton.action = #selector(saveTokens)
+        saveButton.action = #selector(saveCredentials)
         saveButton.keyEquivalent = "\r"
 
         refreshButton.target = self
@@ -151,9 +151,9 @@ final class MainWindowViewController: NSViewController {
     }
 
     private func applyInitialData() {
-        let tokens = trackerController.currentTokens()
-        csrfField.stringValue = tokens.sanitizedCSRF
-        sessionField.stringValue = tokens.sanitizedSession
+        let credentials = trackerController.currentCredentials()
+        emailField.stringValue = credentials.sanitizedEmail
+        passwordField.stringValue = credentials.sanitizedPassword
         updateLogView(with: trackerController.currentLogs())
     }
 
@@ -183,8 +183,8 @@ final class MainWindowViewController: NSViewController {
         }
     }
 
-    @objc private func saveTokens() {
-        trackerController.updateTokens(csrfToken: csrfField.stringValue, session: sessionField.stringValue)
+    @objc private func saveCredentials() {
+        trackerController.updateCredentials(email: emailField.stringValue, password: passwordField.stringValue)
     }
 
     @objc private func refreshStatus() {
@@ -270,7 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var stateListenerID: UUID?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+//        NSApp.setActivationPolicy(.accessory)
         setupStatusItem()
         setupMainWindow()
         trackerController.start()
