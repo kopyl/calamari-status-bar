@@ -80,7 +80,11 @@ final class MainWindowViewController: NSViewController {
         projectPopup.target = self
         projectPopup.action = #selector(projectSelectionChanged)
         projectPopup.translatesAutoresizingMaskIntoConstraints = false
-        container.addArrangedSubview(makePopupRow(label: "Project", popup: projectPopup))
+        
+        view.addSubview(projectPopup)
+        
+        projectPopup.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20).isActive = true
+        projectPopup.topAnchor.constraint(equalTo: view.topAnchor, constant: 20).isActive = true
 
         emailField.placeholderString = "email"
         passwordField.placeholderString = "password"
