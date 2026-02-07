@@ -120,6 +120,12 @@ final class TrackerController {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter
     }()
+    private static let apiDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
 
     private let networkClient = NetworkClient()
     private let tokensStore = TokenStore()
@@ -128,10 +134,12 @@ final class TrackerController {
     private var logListeners: [UUID: ([String]) -> Void] = [:]
     private var authListeners: [UUID: (Bool) -> Void] = [:]
     private var projectListeners: [UUID: ([Project]) -> Void] = [:]
+    private var timeListeners: [UUID: (Int) -> Void] = [:]
     private var logs: [String] = []
     private var projects: [Project] = []
     private var state: TrackerState = .loading
     private var lastStableState: TrackerState = .stopped
+    private var totalSecondsToday: Int = 0
     private var credentials: Credentials
     private var authTokens: AuthTokens?
     private var isLoginEnabled: Bool
@@ -291,6 +299,20 @@ final class TrackerController {
     }
 
     @discardableResult
+    func addTimeListener(_ listener: @escaping (Int) -> Void) -> UUID {
+        let id = UUID()
+        timeListeners[id] = listener
+        DispatchQueue.main.async { [totalSecondsToday] in
+            listener(totalSecondsToday)
+        }
+        return id
+    }
+
+    func removeTimeListener(_ id: UUID) {
+        timeListeners.removeValue(forKey: id)
+    }
+
+    @discardableResult
     func addAuthListener(_ listener: @escaping (Bool) -> Void) -> UUID {
         let id = UUID()
         authListeners[id] = listener
@@ -366,11 +388,13 @@ final class TrackerController {
             let newState = try parseStatus(from: response.data)
             let fetchedProjects = parseProjects(from: response.data)
             let trackedProject = parseTrackedProject(from: response.data)
+            let totalSeconds = parseTotalSeconds(from: response.data)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isBusy = false
                 self.pendingStatusRefresh = false
                 self.updateState(newState)
+                self.updateTotalSeconds(totalSeconds)
                 self.updateProjects(fetchedProjects)
                 if trackedProject.hasActiveShift {
                     self.updateSelectedProjectFromStatus(trackedProject.projectId)
@@ -480,6 +504,75 @@ final class TrackerController {
             return (true, nil)
         }
         return (false, nil)
+    }
+
+    private func parseTotalSeconds(from data: Data) -> Int {
+        guard let jsonObject = try? JSONSerialization.jsonObject(with: data),
+              let root = jsonObject as? [String: Any],
+              let dayShifts = root["dayShifts"] as? [[String: Any]] else {
+            return 0
+        }
+        let nowString = root["now"] as? String
+        let nowDate = nowString.flatMap { Self.apiDateFormatter.date(from: $0) } ?? Date()
+        var total = 0
+        for shift in dayShifts {
+            if let shiftSeconds = shiftDurationSeconds(shift: shift, now: nowDate) {
+                total += shiftSeconds
+                continue
+            }
+            if let projects = shift["projects"] as? [[String: Any]] {
+                for project in projects {
+                    if let seconds = intValue(project["secondsDuration"]) {
+                        total += seconds
+                        continue
+                    }
+                    let isActive = (project["projectFinished"] == nil || project["projectFinished"] is NSNull)
+                    guard isActive,
+                          let startedString = project["projectStarted"] as? String,
+                          let startedDate = Self.apiDateFormatter.date(from: startedString) else {
+                        continue
+                    }
+                    let interval = Int(nowDate.timeIntervalSince(startedDate))
+                    if interval > 0 {
+                        total += interval
+                    }
+                }
+            }
+        }
+        return total
+    }
+
+    private func shiftDurationSeconds(shift: [String: Any], now: Date) -> Int? {
+        guard let startedString = shift["startedTime"] as? String,
+              let startedDate = Self.apiDateFormatter.date(from: startedString) else {
+            return nil
+        }
+        if let finishedString = shift["finishedTime"] as? String,
+           let finishedDate = Self.apiDateFormatter.date(from: finishedString) {
+            let interval = Int(finishedDate.timeIntervalSince(startedDate))
+            return interval > 0 ? interval : 0
+        }
+        let isActive = (shift["finishedTime"] == nil || shift["finishedTime"] is NSNull)
+        if isActive {
+            let interval = Int(now.timeIntervalSince(startedDate))
+            return interval > 0 ? interval : 0
+        }
+        return nil
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        switch value {
+        case let number as NSNumber:
+            return number.intValue
+        case let intValue as Int:
+            return intValue
+        case let doubleValue as Double:
+            return Int(doubleValue)
+        case let stringValue as String:
+            return Int(stringValue)
+        default:
+            return nil
+        }
     }
 
     private func extractStateString(from data: Data) -> String? {
@@ -636,6 +729,14 @@ final class TrackerController {
         notifyProjectListeners()
     }
 
+    private func updateTotalSeconds(_ newTotalSeconds: Int) {
+        if newTotalSeconds == totalSecondsToday {
+            return
+        }
+        totalSecondsToday = newTotalSeconds
+        notifyTimeListeners()
+    }
+
     private func notifyAuthListeners() {
         let snapshot = isAuthenticated()
         DispatchQueue.main.async {
@@ -649,6 +750,15 @@ final class TrackerController {
         let snapshot = projects
         DispatchQueue.main.async {
             for handler in self.projectListeners.values {
+                handler(snapshot)
+            }
+        }
+    }
+
+    private func notifyTimeListeners() {
+        let snapshot = totalSecondsToday
+        DispatchQueue.main.async {
+            for handler in self.timeListeners.values {
                 handler(snapshot)
             }
         }

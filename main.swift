@@ -463,6 +463,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var mainWindow: NSWindow?
     private var mainWindowController: NSWindowController?
     private var stateListenerID: UUID?
+    private var timeListenerID: UUID?
+    private var currentState: TrackerController.TrackerState = .loading
+    private var totalTimeText: String = "0:00"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
 //        NSApp.setActivationPolicy(.accessory)
@@ -475,6 +478,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let stateListenerID {
             trackerController.removeStateListener(stateListenerID)
         }
+        if let timeListenerID {
+            trackerController.removeTimeListener(timeListenerID)
+        }
     }
 
     private func setupStatusItem() {
@@ -485,9 +491,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.image = iconProvider.icon(for: .loading)
         button.imageScaling = .scaleProportionallyDown
+        button.imagePosition = .imageLeft
         button.toolTip = "Calamari Tracker"
         stateListenerID = trackerController.addStateListener { [weak self] state in
+            self?.currentState = state
             self?.updateStatusItem(for: state)
+        }
+        timeListenerID = trackerController.addTimeListener { [weak self] totalSeconds in
+            guard let self else { return }
+            self.totalTimeText = Self.formatTime(totalSeconds: totalSeconds)
+            self.updateStatusItem(for: self.currentState)
         }
     }
 
@@ -517,11 +530,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let button = statusItem?.button else { return }
         button.image = iconProvider.icon(for: state)
         switch state {
+        case .started, .stopped:
+            button.title = totalTimeText
+        default:
+            button.title = ""
+        }
+        switch state {
         case .error(let message):
             button.toolTip = "Calamari Tracker — \(message)"
         default:
             button.toolTip = "Calamari Tracker — \(state.displayDescription)"
         }
+    }
+
+    private static func formatTime(totalSeconds: Int) -> String {
+        let safeSeconds = max(0, totalSeconds)
+        let hours = safeSeconds / 3600
+        let minutes = (safeSeconds % 3600) / 60
+        return String(format: "%d:%02d", hours, minutes)
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
