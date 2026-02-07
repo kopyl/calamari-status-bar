@@ -263,7 +263,6 @@ final class TrackerController {
             let response = try await sendRequest(for: .status)
             responseBody = String(data: response.data, encoding: .utf8) ?? "<non-utf8>"
             let newState = try parseStatus(from: response.data)
-            let bodyForLog = responseBody
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isBusy = false
