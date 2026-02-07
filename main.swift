@@ -1,10 +1,10 @@
 import Cocoa
 
 private enum WindowConfig {
-    static let defaultSize = NSSize(width: 540, height: 420)
-    static let minimumSize = NSSize(width: 480, height: 320)
-    static let loginSize = NSSize(width: 200, height: 260)
-    static let loginMinimumSize = NSSize(width: 200, height: 260)
+    static let defaultSize = NSSize(width: 300, height: 420)
+    static let minimumSize = NSSize(width: 300, height: 320)
+    static let loginSize = NSSize(width: 300, height: 260)
+    static let loginMinimumSize = NSSize(width: 300, height: 260)
 }
 
 final class MainWindowViewController: NSViewController {
