@@ -573,6 +573,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 statusMenu.popUp(positioning: nil, at: origin, in: button)
             }
         } else {
+            if trackerController.isAuthenticated() == false {
+                openMainWindow()
+                return
+            }
             trackerController.handleStatusItemTap()
         }
     }
