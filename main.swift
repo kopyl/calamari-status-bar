@@ -120,6 +120,7 @@ final class MainWindowViewController: NSViewController {
         logTextView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         logTextView.textContainerInset = NSSize(width: 8, height: 8)
         logTextView.backgroundColor = NSColor.textBackgroundColor
+        logTextView.autoresizingMask = [.width]
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false

@@ -57,7 +57,7 @@ final class TrackerController {
             case .loading: return "Loading…"
             case .started: return "Timer started"
             case .stopped: return "Timer stopped"
-            case .error(let message): return "Error: \(message)"
+            case .error: return "Error"
             }
         }
     }
