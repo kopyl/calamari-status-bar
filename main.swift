@@ -250,7 +250,7 @@ private final class StatusIconProvider {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let trackerController = TrackerController()
     private let iconProvider = StatusIconProvider()
     private var statusItem: NSStatusItem?
@@ -307,6 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.minSize = WindowConfig.minimumSize
         window.title = "Calamari Tracker"
         window.isReleasedWhenClosed = false
+        window.delegate = self
         let controller = MainWindowViewController(trackerController: trackerController)
         window.contentViewController = controller
         window.center()
@@ -352,6 +353,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quitApplication() {
         NSApp.terminate(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if let window = notification.object as? NSWindow, window == mainWindow {
+            mainWindow = nil
+            mainWindowController = nil
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            openMainWindow()
+        }
+        return true
     }
 }
 
