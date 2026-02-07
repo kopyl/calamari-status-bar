@@ -551,8 +551,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func signOut() {
-        trackerController.signOut()
-        openMainWindow()
+        Task { @MainActor in
+            try await trackerController.runStop()
+            trackerController.signOut()
+            openMainWindow()
+        }
     }
 
     func windowWillClose(_ notification: Notification) {

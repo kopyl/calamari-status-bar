@@ -395,7 +395,7 @@ final class TrackerController {
         }
     }
 
-    private func runStop() async throws {
+    public func runStop() async throws {
         let response = try await sendRequest(for: .stop)
         appendLog("Stop tracker succeeded (HTTP \(response.statusCode)).")
     }
