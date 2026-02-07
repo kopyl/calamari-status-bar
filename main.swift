@@ -353,6 +353,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let openItem = NSMenuItem(title: "Open Tracker Window", action: #selector(openMainWindow), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
+        let signOutItem = NSMenuItem(title: "Sign Out", action: #selector(signOut), keyEquivalent: "")
+        signOutItem.target = self
+        menu.addItem(signOutItem)
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApplication), keyEquivalent: "q")
         quitItem.target = self
@@ -447,6 +450,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func quitApplication() {
         NSApp.terminate(nil)
+    }
+
+    @objc private func signOut() {
+        trackerController.signOut()
+        openMainWindow()
     }
 
     func windowWillClose(_ notification: Notification) {

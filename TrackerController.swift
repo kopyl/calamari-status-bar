@@ -134,6 +134,7 @@ final class TrackerController {
     private var lastStableState: TrackerState = .stopped
     private var credentials: Credentials
     private var authTokens: AuthTokens?
+    private var isLoginEnabled: Bool
     private var selectedProjectId: Int?
     private var isBusy = false
     private var pendingStatusRefresh = false
@@ -141,6 +142,8 @@ final class TrackerController {
 
     init() {
         credentials = tokensStore.load()
+        authTokens = tokensStore.loadAuthTokens()
+        isLoginEnabled = tokensStore.loadLoginEnabled()
         selectedProjectId = tokensStore.loadProjectId()
     }
 
@@ -152,11 +155,18 @@ final class TrackerController {
         notifyStateListeners(state)
         notifyAuthListeners()
         notifyProjectListeners()
-        startPolling()
-        refreshStatus(showLoading: true)
+        if isLoginEnabled {
+            startPolling()
+            refreshStatus(showLoading: true)
+        }
     }
 
     func handleStatusItemTap() {
+        guard isLoginEnabled else {
+            appendLog("Signed out. Sign in to control tracker.")
+            updateState(.error("Signed out"))
+            return
+        }
         guard credentials.isValid else {
             appendLog("Credentials missing. Update email/password to control tracker.")
             updateState(.error("Credentials missing"))
@@ -174,6 +184,10 @@ final class TrackerController {
     }
 
     func refreshStatus(showLoading: Bool = false) {
+        guard isLoginEnabled else {
+            updateState(.error("Signed out"))
+            return
+        }
         guard credentials.isValid else {
             updateState(.error("Credentials missing"))
             return
@@ -202,6 +216,8 @@ final class TrackerController {
         authTokens = nil
         authFailureDetected = false
         tokensStore.save(credentials)
+        tokensStore.saveAuthTokens(nil)
+        updateLoginEnabled(true)
         appendLog("Credentials updated.")
         notifyAuthListeners()
         startPolling()
@@ -225,7 +241,7 @@ final class TrackerController {
     }
 
     func isAuthenticated() -> Bool {
-        authTokens?.isValid == true && authFailureDetected == false
+        isLoginEnabled && authTokens?.isValid == true && authFailureDetected == false
     }
 
     @discardableResult
@@ -288,6 +304,25 @@ final class TrackerController {
     func updateSelectedProjectId(_ id: Int?) {
         selectedProjectId = id
         tokensStore.saveProjectId(id)
+    }
+
+    func signOut() {
+        updateLoginEnabled(false)
+        authTokens = nil
+        tokensStore.saveAuthTokens(nil)
+        authFailureDetected = false
+        pollTimer?.invalidate()
+        updateState(.error("Signed out"))
+        appendLog("Signed out locally.")
+    }
+
+    private func updateLoginEnabled(_ enabled: Bool) {
+        if isLoginEnabled == enabled {
+            return
+        }
+        isLoginEnabled = enabled
+        tokensStore.saveLoginEnabled(enabled)
+        notifyAuthListeners()
     }
 
     private func updateSelectedProjectFromStatus(_ id: Int?) {
@@ -492,6 +527,8 @@ final class TrackerController {
         case TrackerError.authenticationFailed(let reason):
             message = "Auth failed: \(reason)"
             authFailureDetected = true
+            authTokens = nil
+            tokensStore.saveAuthTokens(nil)
             pendingStatusRefresh = false
             pollTimer?.invalidate()
             notifyAuthListeners()
@@ -529,6 +566,7 @@ final class TrackerController {
             )
             await MainActor.run { [weak self] in
                 self?.authTokens = newTokens
+                self?.tokensStore.saveAuthTokens(newTokens)
                 self?.appendLog("Authenticated successfully.")
                 self?.notifyAuthListeners()
             }
@@ -623,6 +661,9 @@ private final class TokenStore {
     private let emailKey = "CalamariTrackerEmail"
     private let passwordKey = "CalamariTrackerPassword"
     private let projectIdKey = "CalamariTrackerProjectId"
+    private let loginEnabledKey = "CalamariTrackerLoginEnabled"
+    private let csrfTokenKey = "CalamariTrackerCSRFToken"
+    private let sessionTokenKey = "CalamariTrackerSessionToken"
 
     func load() -> TrackerController.Credentials {
         let defaults = UserDefaults.standard
@@ -637,6 +678,16 @@ private final class TokenStore {
         defaults.set(credentials.sanitizedPassword, forKey: passwordKey)
     }
 
+    func loadLoginEnabled() -> Bool {
+        let defaults = UserDefaults.standard
+        return defaults.bool(forKey: loginEnabledKey)
+    }
+
+    func saveLoginEnabled(_ enabled: Bool) {
+        let defaults = UserDefaults.standard
+        defaults.set(enabled, forKey: loginEnabledKey)
+    }
+
     func loadProjectId() -> Int? {
         let defaults = UserDefaults.standard
         let value = defaults.object(forKey: projectIdKey) as? NSNumber
@@ -649,6 +700,28 @@ private final class TokenStore {
             defaults.set(projectId, forKey: projectIdKey)
         } else {
             defaults.removeObject(forKey: projectIdKey)
+        }
+    }
+
+    func loadAuthTokens() -> TrackerController.AuthTokens? {
+        let defaults = UserDefaults.standard
+        guard let csrf = defaults.string(forKey: csrfTokenKey),
+              let session = defaults.string(forKey: sessionTokenKey),
+              csrf.isEmpty == false,
+              session.isEmpty == false else {
+            return nil
+        }
+        return TrackerController.AuthTokens(csrfToken: csrf, session: session)
+    }
+
+    func saveAuthTokens(_ tokens: TrackerController.AuthTokens?) {
+        let defaults = UserDefaults.standard
+        if let tokens, tokens.isValid {
+            defaults.set(tokens.sanitizedCSRF, forKey: csrfTokenKey)
+            defaults.set(tokens.sanitizedSession, forKey: sessionTokenKey)
+        } else {
+            defaults.removeObject(forKey: csrfTokenKey)
+            defaults.removeObject(forKey: sessionTokenKey)
         }
     }
 }
