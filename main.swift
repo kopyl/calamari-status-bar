@@ -7,83 +7,6 @@ private enum WindowConfig {
     static let loginMinimumSize = NSSize(width: 300, height: 300)
 }
 
-final class MainWindowViewController: NSViewController {
-    private let trackerController: TrackerController
-    private var authListenerID: UUID?
-    private var currentChild: NSViewController?
-
-    init(trackerController: TrackerController) {
-        self.trackerController = trackerController
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        if let authListenerID {
-            trackerController.removeAuthListener(authListenerID)
-        }
-    }
-
-    override func loadView() {
-        view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        showContent(isAuthenticated: trackerController.isAuthenticated())
-        authListenerID = trackerController.addAuthListener { [weak self] isAuthenticated in
-            self?.showContent(isAuthenticated: isAuthenticated)
-        }
-    }
-
-    private func showContent(isAuthenticated: Bool) {
-        let nextController: NSViewController
-        if isAuthenticated {
-            nextController = TrackerViewController(trackerController: trackerController)
-        } else {
-            nextController = LoginViewController(trackerController: trackerController)
-        }
-
-        if let currentChild {
-            currentChild.view.removeFromSuperview()
-            currentChild.removeFromParent()
-        }
-        addChild(nextController)
-        nextController.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(nextController.view)
-        NSLayoutConstraint.activate([
-            nextController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            nextController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            nextController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            nextController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-        currentChild = nextController
-        updateWindowSize(isAuthenticated: isAuthenticated)
-    }
-
-    private func updateWindowSize(isAuthenticated: Bool) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let window = self.view.window else { return }
-            let targetSize = isAuthenticated ? WindowConfig.defaultSize : WindowConfig.loginSize
-            let targetMinSize = isAuthenticated ? WindowConfig.minimumSize : WindowConfig.loginMinimumSize
-            window.minSize = targetMinSize
-
-            let targetContentRect = NSRect(origin: .zero, size: targetSize)
-            let targetWindowFrame = window.frameRect(forContentRect: targetContentRect)
-            var newFrame = window.frame
-            let deltaHeight = newFrame.size.height - targetWindowFrame.size.height
-            newFrame.size = targetWindowFrame.size
-            newFrame.origin.y += deltaHeight
-            window.setFrame(newFrame, display: true, animate: true)
-        }
-    }
-}
-
 final class LoginViewController: NSViewController {
     private let trackerController: TrackerController
     private let organizationField = NSTextField()
@@ -559,8 +482,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.updateStatusItem(for: self.currentState)
         }
         updateSignOutState(isAuthenticated: trackerController.isAuthenticated())
+        updateMainWindowContent(isAuthenticated: trackerController.isAuthenticated())
         authListenerID = trackerController.addAuthListener { [weak self] isAuthenticated in
             self?.updateSignOutState(isAuthenticated: isAuthenticated)
+            self?.updateMainWindowContent(isAuthenticated: isAuthenticated)
         }
     }
 
@@ -580,14 +505,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.title = "Calamari Tracker"
         window.isReleasedWhenClosed = false
         window.delegate = self
-        let controller = MainWindowViewController(trackerController: trackerController)
-        window.contentViewController = controller
+        window.contentViewController = NSViewController()
         window.center()
 
         mainWindow = window
         mainWindowController = NSWindowController(window: window)
+        updateMainWindowContent(isAuthenticated: trackerController.isAuthenticated())
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func updateMainWindowContent(isAuthenticated: Bool) {
+        guard let window = mainWindow else { return }
+        let controller: NSViewController
+        if isAuthenticated {
+            controller = TrackerViewController(trackerController: trackerController)
+        } else {
+            controller = LoginViewController(trackerController: trackerController)
+        }
+        window.contentViewController = controller
+        updateMainWindowSize(isAuthenticated: isAuthenticated, window: window)
+    }
+
+    private func updateMainWindowSize(isAuthenticated: Bool, window: NSWindow) {
+        DispatchQueue.main.async {
+            let targetSize = isAuthenticated ? WindowConfig.defaultSize : WindowConfig.loginSize
+            let targetMinSize = isAuthenticated ? WindowConfig.minimumSize : WindowConfig.loginMinimumSize
+            window.minSize = targetMinSize
+
+            let targetContentRect = NSRect(origin: .zero, size: targetSize)
+            let targetWindowFrame = window.frameRect(forContentRect: targetContentRect)
+            var newFrame = window.frame
+            let deltaHeight = newFrame.size.height - targetWindowFrame.size.height
+            newFrame.size = targetWindowFrame.size
+            newFrame.origin.y += deltaHeight
+            window.setFrame(newFrame, display: true, animate: true)
+        }
     }
 
     private func updateStatusItem(for state: TrackerController.TrackerState) {
