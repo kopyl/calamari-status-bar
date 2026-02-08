@@ -146,6 +146,7 @@ final class TrackerViewController: NSViewController {
     private let statusLabel = NSTextField(labelWithString: "Loading…")
     private let projectPopup = NSPopUpButton()
     private let logTextView = NSTextView()
+    private let hideInBackgroundButton = NSButton(title: "Hide app in background", target: nil, action: nil)
     private var stateListenerID: UUID?
     private var logListenerID: UUID?
     private var projectListenerID: UUID?
@@ -193,13 +194,6 @@ final class TrackerViewController: NSViewController {
         container.alignment = .leading
         view.addSubview(container)
 
-        NSLayoutConstraint.activate([
-            container.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            container.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            container.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
-            container.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20)
-        ])
-
         statusLabel.font = NSFont.systemFont(ofSize: 14, weight: .medium)
         statusLabel.alignment = .left
         statusLabel.lineBreakMode = .byWordWrapping
@@ -227,6 +221,23 @@ final class TrackerViewController: NSViewController {
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
         container.addArrangedSubview(scrollView)
+
+        hideInBackgroundButton.target = self
+        hideInBackgroundButton.action = #selector(hideAppInBackground)
+        
+        view.addSubview(hideInBackgroundButton)
+        hideInBackgroundButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        hideInBackgroundButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20).isActive = true
+        hideInBackgroundButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20).isActive = true
+        hideInBackgroundButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20).isActive = true
+        
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            container.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
+            container.bottomAnchor.constraint(equalTo: hideInBackgroundButton.topAnchor, constant: -20)
+        ])
     }
 
     private func applyInitialData() {
@@ -336,6 +347,11 @@ final class TrackerViewController: NSViewController {
         } else {
             trackerController.updateSelectedProjectId(nil)
         }
+    }
+
+    @objc private func hideAppInBackground() {
+        NSApp.setActivationPolicy(.accessory)
+        view.window?.orderOut(nil)
     }
 }
 
@@ -592,6 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func openMainWindow() {
+        NSApp.setActivationPolicy(.regular)
         if mainWindow == nil {
             setupMainWindow()
         } else {
