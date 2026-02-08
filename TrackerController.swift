@@ -157,7 +157,7 @@ final class TrackerController {
     private var timeListeners: [UUID: (Int) -> Void] = [:]
     private var logs: [String] = []
     private var projects: [Project] = []
-    private var state: TrackerState = .loading
+    public var state: TrackerState = .loading
     private var lastStableState: TrackerState = .stopped
     private var totalSecondsToday: Int = 0
     private var credentials: Credentials
