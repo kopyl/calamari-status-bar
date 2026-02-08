@@ -3,12 +3,16 @@ import Security
 
 final class TrackerController {
     struct Credentials: Equatable {
+        var organization: String
         var email: String
         var password: String
 
+        var sanitizedOrganization: String { Self.normalizeOrganization(organization) }
         var sanitizedEmail: String { Self.normalize(email) }
         var sanitizedPassword: String { Self.normalize(password) }
-        var isValid: Bool { !sanitizedEmail.isEmpty && !sanitizedPassword.isEmpty }
+        var isValid: Bool {
+            !sanitizedOrganization.isEmpty && !sanitizedEmail.isEmpty && !sanitizedPassword.isEmpty
+        }
 
         private static func normalize(_ value: String) -> String {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -20,6 +24,21 @@ final class TrackerController {
                 return String(mutable)
             }
             return trimmed
+        }
+
+        private static func normalizeOrganization(_ value: String) -> String {
+            var normalized = normalize(value).lowercased()
+            if let schemeRange = normalized.range(of: "://") {
+                normalized = String(normalized[schemeRange.upperBound...])
+            }
+            if let slashIndex = normalized.firstIndex(of: "/") {
+                normalized = String(normalized[..<slashIndex])
+            }
+            if normalized.hasSuffix(".calamari.io") {
+                normalized = String(normalized.dropLast(".calamari.io".count))
+            }
+            normalized = normalized.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return normalized
         }
     }
 
@@ -184,7 +203,7 @@ final class TrackerController {
             return
         }
         guard credentials.isValid else {
-            appendLog("Credentials missing. Update email/password to control tracker.")
+            appendLog("Credentials missing. Update organization/email/password to control tracker.")
             updateState(.stopped)
             return
         }
@@ -231,8 +250,8 @@ final class TrackerController {
         }
     }
 
-    func updateCredentials(email: String, password: String) {
-        let newCredentials = Credentials(email: email, password: password)
+    func updateCredentials(organization: String, email: String, password: String) {
+        let newCredentials = Credentials(organization: organization, email: email, password: password)
         credentials = newCredentials
         authTokens = nil
         authFailureDetected = false
@@ -445,8 +464,16 @@ final class TrackerController {
 
     private func sendRequest(for route: Route) async throws -> NetworkClient.Response {
         let sessionTokens = try await ensureAuthenticated()
+        let currentCredentials = credentials
+        guard currentCredentials.isValid else {
+            throw TrackerError.credentialsMissing
+        }
         do {
-            return try await networkClient.send(route.descriptor, tokens: sessionTokens)
+            return try await networkClient.send(
+                route.descriptor,
+                tokens: sessionTokens,
+                organization: currentCredentials.sanitizedOrganization
+            )
         } catch let error as NetworkClient.Error {
             switch error {
             case .transport(let label, let underlying):
@@ -690,6 +717,7 @@ final class TrackerController {
         }
         do {
             let newTokens = try await networkClient.authenticate(
+                organization: currentCredentials.sanitizedOrganization,
                 email: currentCredentials.sanitizedEmail,
                 password: currentCredentials.sanitizedPassword
             )
@@ -818,6 +846,7 @@ final class TrackerController {
 private final class TokenStore {
     private let emailKey = "CalamariTrackerEmail"
     private let passwordKey = "CalamariTrackerPassword"
+    private let organizationKey = "CalamariTrackerOrganization"
     private let projectIdKey = "CalamariTrackerProjectId"
     private let loginEnabledKey = "CalamariTrackerLoginEnabled"
     private let csrfTokenKey = "CalamariTrackerCSRFToken"
@@ -825,12 +854,14 @@ private final class TokenStore {
     private let keychainStore = KeychainStore(service: "CalamariStatusBar")
 
     func load() -> TrackerController.Credentials {
+        let organization = keychainStore.loadString(organizationKey) ?? ""
         let email = keychainStore.loadString(emailKey) ?? ""
         let password = keychainStore.loadString(passwordKey) ?? ""
-        return TrackerController.Credentials(email: email, password: password)
+        return TrackerController.Credentials(organization: organization, email: email, password: password)
     }
 
     func save(_ credentials: TrackerController.Credentials) {
+        keychainStore.saveString(credentials.sanitizedOrganization, for: organizationKey)
         keychainStore.saveString(credentials.sanitizedEmail, for: emailKey)
         keychainStore.saveString(credentials.sanitizedPassword, for: passwordKey)
     }
@@ -984,7 +1015,6 @@ private final class NetworkClient {
         }
     }
 
-    private let baseURL = URL(string: "https://xxx.calamari.io")!
     private let authBaseURL = URL(string: "https://core.calamari.io")!
     private let originURL = URL(string: "https://auth.calamari.io")!
     private let session: URLSession
@@ -1001,8 +1031,12 @@ private final class NetworkClient {
         self.authSession = URLSession(configuration: config)
     }
 
-    func send(_ descriptor: RequestDescriptor, tokens: TrackerController.AuthTokens) async throws -> Response {
-        let url = baseURL.appendingPathComponent(descriptor.path)
+    func send(
+        _ descriptor: RequestDescriptor,
+        tokens: TrackerController.AuthTokens,
+        organization: String
+    ) async throws -> Response {
+        let url = baseURL(for: organization).appendingPathComponent(descriptor.path)
         var request = URLRequest(url: url)
         request.httpMethod = descriptor.method.rawValue
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -1030,9 +1064,14 @@ private final class NetworkClient {
         }
     }
 
-    func authenticate(email: String, password: String) async throws -> TrackerController.AuthTokens {
+    func authenticate(organization: String, email: String, password: String) async throws -> TrackerController.AuthTokens {
         let csrfToken = try await fetchCSRFToken()
-        let sessionToken = try await signIn(email: email, password: password, csrfToken: csrfToken)
+        let sessionToken = try await signIn(
+            organization: organization,
+            email: email,
+            password: password,
+            csrfToken: csrfToken
+        )
         return TrackerController.AuthTokens(csrfToken: csrfToken, session: sessionToken)
     }
 
@@ -1062,8 +1101,8 @@ private final class NetworkClient {
         }
     }
 
-    private func signIn(email: String, password: String, csrfToken: String) async throws -> String {
-        let url = baseURL.appendingPathComponent("/sign-in.do")
+    private func signIn(organization: String, email: String, password: String, csrfToken: String) async throws -> String {
+        let url = baseURL(for: organization).appendingPathComponent("/sign-in.do")
         var request = URLRequest(url: url)
         request.httpMethod = Method.post.rawValue
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -1074,7 +1113,7 @@ private final class NetworkClient {
         request.setValue(csrfToken, forHTTPHeaderField: "x-csrf-token")
         request.setValue("_csrf_token=\(csrfToken)", forHTTPHeaderField: "Cookie")
         let body: [String: Any] = [
-            "domain": domain,
+            "domain": domain(for: organization),
             "login": email,
             "password": password
         ]
@@ -1097,9 +1136,12 @@ private final class NetworkClient {
         }
     }
 
-    private var domain: String {
-        let host = baseURL.host ?? ""
-        return host.components(separatedBy: ".").first ?? ""
+    private func baseURL(for organization: String) -> URL {
+        URL(string: "https://\(organization).calamari.io")!
+    }
+
+    private func domain(for organization: String) -> String {
+        organization
     }
 
     private func cookie(named name: String, response: HTTPURLResponse, url: URL) -> HTTPCookie? {

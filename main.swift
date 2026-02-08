@@ -3,8 +3,8 @@ import Cocoa
 private enum WindowConfig {
     static let defaultSize = NSSize(width: 300, height: 420)
     static let minimumSize = NSSize(width: 300, height: 320)
-    static let loginSize = NSSize(width: 300, height: 260)
-    static let loginMinimumSize = NSSize(width: 300, height: 260)
+    static let loginSize = NSSize(width: 300, height: 300)
+    static let loginMinimumSize = NSSize(width: 300, height: 300)
 }
 
 final class MainWindowViewController: NSViewController {
@@ -86,6 +86,7 @@ final class MainWindowViewController: NSViewController {
 
 final class LoginViewController: NSViewController {
     private let trackerController: TrackerController
+    private let organizationField = NSTextField()
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let saveButton = NSButton(title: "Sign in", target: nil, action: nil)
@@ -134,9 +135,10 @@ final class LoginViewController: NSViewController {
             container.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -20)
         ])
 
+        organizationField.placeholderString = "organization"
         emailField.placeholderString = "email"
         passwordField.placeholderString = "password"
-        [emailField, passwordField].forEach { field in
+        [organizationField, emailField, passwordField].forEach { field in
             field.translatesAutoresizingMaskIntoConstraints = false
             field.usesSingleLineMode = true
             field.lineBreakMode = .byTruncatingTail
@@ -148,12 +150,15 @@ final class LoginViewController: NSViewController {
         tokenStack.alignment = .leading
         tokenStack.spacing = 8
         tokenStack.translatesAutoresizingMaskIntoConstraints = false
+        let organizationColumn = makeInputColumn(label: "Organization", field: organizationField)
         let emailColumn = makeInputColumn(label: "Email", field: emailField)
         let passwordColumn = makeInputColumn(label: "Password", field: passwordField)
+        tokenStack.addArrangedSubview(organizationColumn)
         tokenStack.addArrangedSubview(emailColumn)
         tokenStack.addArrangedSubview(passwordColumn)
         container.addArrangedSubview(tokenStack)
         tokenStack.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        organizationColumn.widthAnchor.constraint(equalTo: tokenStack.widthAnchor).isActive = true
         emailColumn.widthAnchor.constraint(equalTo: tokenStack.widthAnchor).isActive = true
         passwordColumn.widthAnchor.constraint(equalTo: tokenStack.widthAnchor).isActive = true
 
@@ -189,6 +194,7 @@ final class LoginViewController: NSViewController {
 
     private func applyInitialData() {
         let credentials = trackerController.currentCredentials()
+        organizationField.stringValue = credentials.sanitizedOrganization
         emailField.stringValue = credentials.sanitizedEmail
         passwordField.stringValue = credentials.sanitizedPassword
     }
@@ -204,7 +210,11 @@ final class LoginViewController: NSViewController {
     }
 
     @objc private func saveCredentials() {
-        trackerController.updateCredentials(email: emailField.stringValue, password: passwordField.stringValue)
+        trackerController.updateCredentials(
+            organization: organizationField.stringValue,
+            email: emailField.stringValue,
+            password: passwordField.stringValue
+        )
     }
 }
 
