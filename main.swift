@@ -433,7 +433,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return menu
     }()
     private var mainWindow: NSWindow?
-    private var mainWindowController: NSWindowController?
     private var stateListenerID: UUID?
     private var timeListenerID: UUID?
     private var authListenerID: UUID?
@@ -509,7 +508,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.center()
 
         mainWindow = window
-        mainWindowController = NSWindowController(window: window)
+        let _ = NSWindowController(window: window)
         updateMainWindowContent(isAuthenticated: trackerController.isAuthenticated())
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -618,7 +617,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow, window == mainWindow {
             mainWindow = nil
-            mainWindowController = nil
         }
     }
 
