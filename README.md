@@ -9,6 +9,8 @@
 1. Start and stop time tracking with a single click on the status bar icon
 2. Display the currently tracked time in the status bar menu
 3. Select and remember the last used project for time tracking
+4. When there is an error in the app, or the internet connection is lost, clicking on the status bar icon will open the app's main window
+5. When the internet connection is lost, the app will display a "No internet connection" icon in the status bar.
 
 ## How to use:
 1. Open the app
