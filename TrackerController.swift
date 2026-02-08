@@ -75,6 +75,7 @@ final class TrackerController {
         case loading
         case started
         case stopped
+        case offline
         case error(String)
 
         var displayDescription: String {
@@ -82,6 +83,7 @@ final class TrackerController {
             case .loading: return "Loading…"
             case .started: return "Timer started"
             case .stopped: return "Timer stopped"
+            case .offline: return "Offline"
             case .error: return "Error"
             }
         }
@@ -685,7 +687,11 @@ final class TrackerController {
             nextState = .error(message)
         case TrackerError.requestFailed(let label, let underlying):
             message = "\(label) request failed: \(underlying.localizedDescription)"
-            nextState = .error(message)
+            if isOfflineError(underlying) {
+                nextState = .offline
+            } else {
+                nextState = .error(message)
+            }
         case TrackerError.unexpectedStatusCode(let label, let code, let body):
             message = "\(label) HTTP \(code)"
             appendLog("\(label) response body: \(body)")
@@ -696,7 +702,11 @@ final class TrackerController {
             nextState = .error(message)
         default:
             message = error.localizedDescription
-            nextState = .error(message)
+            if isOfflineError(error) {
+                nextState = .offline
+            } else {
+                nextState = .error(message)
+            }
         }
         appendLog("\(context): \(message)")
         updateState(nextState)
@@ -705,6 +715,25 @@ final class TrackerController {
             refreshStatus(showLoading: false)
         }
         handlePendingActions()
+    }
+
+    private func isOfflineError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            if urlError.code == .notConnectedToInternet || urlError.code == .networkConnectionLost {
+                return true
+            }
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain &&
+            (nsError.code == NSURLErrorNotConnectedToInternet || nsError.code == NSURLErrorNetworkConnectionLost) {
+            return true
+        }
+        if let networkError = error as? NetworkClient.Error {
+            if case .transport(_, let underlying) = networkError {
+                return isOfflineError(underlying)
+            }
+        }
+        return false
     }
 
     private func ensureAuthenticated() async throws -> AuthTokens {

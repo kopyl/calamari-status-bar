@@ -327,7 +327,7 @@ final class TrackerViewController: NSViewController {
         statusLabel.stringValue = state.displayDescription
         currentState = state
         switch state {
-        case .error:
+        case .error, .offline:
             statusLabel.textColor = NSColor.systemRed
         default:
             statusLabel.textColor = NSColor.labelColor
@@ -421,6 +421,7 @@ private final class StatusIconProvider {
         case loading
         case started
         case stopped
+        case offline
         case error
     }
 
@@ -435,6 +436,8 @@ private final class StatusIconProvider {
             kind = .started
         case .stopped:
             kind = .stopped
+        case .offline:
+            kind = .offline
         case .error:
             kind = .error
         }
@@ -449,6 +452,8 @@ private final class StatusIconProvider {
             imageName = "stop.fill"
         case .stopped:
             imageName = "play.fill"
+        case .offline:
+            imageName = "network.slash"
         case .error:
             imageName = "exclamationmark.triangle"
         }
@@ -619,6 +624,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         } else {
             if case .error = trackerController.state {
+                openMainWindow()
+                return
+            }
+            if case .offline = trackerController.state {
                 openMainWindow()
                 return
             }
