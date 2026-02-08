@@ -99,3 +99,7 @@ curl 'https://xxx.calamari.io/webapi/clock-screen/get' \
 ### FAQ:
 1. **The list of projects available for time tracking is disabled, how can I enable it?**
    - To select a different project for time tracking, first you must stop the current time tracking session by clicking on the status bar icon. Then the list of projects will become available for selection.
+
+### Implemnentation details:
+- Pressing on the status bar icon when the status is "No internet connection" or "Error" will open the main window
+- Pressing on the status bar icon when not logged in will also open the main window
