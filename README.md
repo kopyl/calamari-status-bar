@@ -17,6 +17,12 @@
 4. Click on the status bar icon again to stop tracking time
 5. Observe the tracked time in the app's menu
 
+## Screenshots:
+1. After you sign in, the app will display the current status of time tracking and the total time tracked for the current day. If you currently don't track time (time trackig was launched from web or mobile app), the app will display the non-tracking status like this:<br>
+![alt text](https://github.com/kopyl/calamari-status-bar/blob/main/screenshots/calamari-status-bar-stopped.png?raw=true)
+2. When you start tracking time, the app will display the currently tracked time for the current day and the tracking status like this:<br>
+![alt text](https://github.com/kopyl/calamari-status-bar/blob/main/screenshots/calamari-status-bar-running.png?raw=true)
+
 ## Request collection:
 
 ### Login:
