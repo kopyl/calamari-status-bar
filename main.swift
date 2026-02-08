@@ -513,7 +513,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var totalTimeText: String = "0:00"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+#if !DEBUG
         NSApp.setActivationPolicy(.accessory)
+#endif
         setupStatusItem()
         setupMainWindow()
         trackerController.start()
