@@ -477,13 +477,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let trackerController = TrackerController()
     private let iconProvider = StatusIconProvider()
     private var statusItem: NSStatusItem?
+    private var signOutMenuItem: NSMenuItem?
     private lazy var statusMenu: NSMenu = {
         let menu = NSMenu()
+        menu.autoenablesItems = false
         let openItem = NSMenuItem(title: "Open Tracker Window", action: #selector(openMainWindow), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
         let signOutItem = NSMenuItem(title: "Sign Out", action: #selector(signOut), keyEquivalent: "")
         signOutItem.target = self
+        signOutMenuItem = signOutItem
         menu.addItem(signOutItem)
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApplication), keyEquivalent: "q")
@@ -495,6 +498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var mainWindowController: NSWindowController?
     private var stateListenerID: UUID?
     private var timeListenerID: UUID?
+    private var authListenerID: UUID?
     private var currentState: TrackerController.TrackerState = .loading
     private var totalTimeText: String = "0:00"
 
@@ -512,10 +516,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let timeListenerID {
             trackerController.removeTimeListener(timeListenerID)
         }
+        if let authListenerID {
+            trackerController.removeAuthListener(authListenerID)
+        }
     }
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        _ = statusMenu
         guard let button = statusItem?.button else { return }
         button.target = self
         button.action = #selector(statusItemClicked(_:))
@@ -533,6 +541,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.totalTimeText = Self.formatTime(totalSeconds: totalSeconds)
             self.updateStatusItem(for: self.currentState)
         }
+        updateSignOutState(isAuthenticated: trackerController.isAuthenticated())
+        authListenerID = trackerController.addAuthListener { [weak self] isAuthenticated in
+            self?.updateSignOutState(isAuthenticated: isAuthenticated)
+        }
+    }
+
+    private func updateSignOutState(isAuthenticated: Bool) {
+        signOutMenuItem?.isEnabled = isAuthenticated
     }
 
     private func setupMainWindow() {
